@@ -28,6 +28,8 @@ typedef struct {
     double Speed;       // 速度（公里/小时）
     double Course;      // 航向（度）
     char Date[11];      // 日期（YYYY-MM-DD格式）
+    
+    // 新增字段
     double Altitude;    // 海拔高度（米）
 } GNRMC;
 

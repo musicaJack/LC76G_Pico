@@ -40,6 +40,10 @@ static GNRMC GPS = {0};
 // 是否显示详细调试日志
 static bool debug_output = false;
 
+// 最后一次解析到的有效速度和航向
+static double last_valid_speed = 0.0;
+static double last_valid_course = 0.0;
+
 /******************************************************************************
 function:	
 	Latitude conversion
@@ -264,15 +268,25 @@ function:
 GNRMC vendor_gps_get_gnrmc() {
     char *token;
     char *rmc_start = NULL;
+    char *gga_start = NULL;
     char rmc_line[128] = {0};
+    bool using_gga = false;
     
     // 重置GPS状态
     GPS.Status = 0;
     GPS.Time_H = 0;
     GPS.Time_M = 0;
     GPS.Time_S = 0;
-    GPS.Speed = 0.0;
-    GPS.Course = 0.0;
+    
+    // 保存之前的速度和航向，避免GGA语句解析时丢失
+    double prev_speed = GPS.Speed;
+    double prev_course = GPS.Course;
+    double prev_altitude = GPS.Altitude; // 保存之前的高度值
+    
+    // 初始化速度和航向（使用之前保存的值）
+    GPS.Speed = prev_speed;
+    GPS.Course = prev_course;
+    GPS.Altitude = prev_altitude; // 初始化高度值
     
     // 清除经纬度
     GPS.Lat = 0.0;
@@ -288,20 +302,31 @@ GNRMC vendor_gps_get_gnrmc() {
         printf("GPS数据前100字符: %s\n", preview);
     }
     
-    // 查找GNRMC语句
+    // 查找GNRMC或GPRMC语句
     rmc_start = strstr(buff_t, "$GNRMC");
     if (!rmc_start) {
         rmc_start = strstr(buff_t, "$GPRMC"); // 尝试查找GPRMC
     }
     
+    // 如果找不到RMC语句，尝试GGA语句
     if (!rmc_start) {
-        if (debug_output) {
-            printf("未找到RMC语句\n");
+        gga_start = strstr(buff_t, "$GNGGA");
+        if (!gga_start) {
+            gga_start = strstr(buff_t, "$GPGGA"); // 尝试查找GPGGA
         }
-        return GPS; // 未找到RMC语句，返回空数据
+        
+        if (gga_start) {
+            rmc_start = gga_start;
+            using_gga = true;
+        } else {
+            if (debug_output) {
+                printf("未找到RMC或GGA语句\n");
+            }
+            return GPS; // 未找到任何支持的语句，返回空数据
+        }
     }
     
-    // 提取完整的RMC语句
+    // 提取完整的语句
     int i = 0;
     while (rmc_start[i] && rmc_start[i] != '\r' && rmc_start[i] != '\n' && i < 127) {
         rmc_line[i] = rmc_start[i];
@@ -310,102 +335,211 @@ GNRMC vendor_gps_get_gnrmc() {
     rmc_line[i] = '\0';
     
     if (debug_output) {
-        printf("解析RMC语句: %s\n", rmc_line);
+        if (using_gga) {
+            printf("解析GGA语句: %s\n", rmc_line);
+        } else {
+            printf("解析RMC语句: %s\n", rmc_line);
+        }
     }
     
     // 使用strtok解析NMEA语句的各个字段
     token = strtok(rmc_line, ",");
     int field = 0;
     
-    while (token != NULL) {
-        switch (field) {
-            case 0: // RMC标识符
-                break;
-                
-            case 1: // UTC时间
-                if (strlen(token) >= 6) {
-                    // 直接从字符串中提取时间
-                    int time = atoi(token);
-                    GPS.Time_H = (time / 10000) + 8; // UTC+8时区
-                    GPS.Time_M = (time / 100) % 100;
-                    GPS.Time_S = time % 100;
+    if (using_gga) {
+        // 解析GGA语句
+        // $GNGGA,hhmmss.sss,ddmm.mmmm,N,dddmm.mmmm,E,q,ss,y.y,a.a,M,b.b,M,c.c,rrrr*hh
+        // 其中：
+        // - hhmmss.sss 是UTC时间
+        // - ddmm.mmmm 是纬度，格式为ddmm.mmmm（度分格式）
+        // - N 是纬度方向，N=北，S=南
+        // - dddmm.mmmm 是经度，格式为dddmm.mmmm（度分格式）
+        // - E 是经度方向，E=东，W=西
+        // - q 是定位质量指示（0=无效，1=GPS定位，2=DGPS定位）
+        // - ss 是正在使用的卫星数量
+        // - y.y 是HDOP水平精度因子
+        // - a.a 是海拔高度
+        // - M 是高度单位，M表示米
+        // - b.b 是大地水准面高度异常
+        // - M 是大地水准面高度异常单位，M表示米
+        // - c.c 是DGPS数据龄期
+        // - rrrr 是DGPS参考站ID
+        
+        while (token != NULL) {
+            switch (field) {
+                case 0: // GGA标识符
+                    break;
                     
-                    // 处理跨天情况
-                    if (GPS.Time_H >= 24) {
-                        GPS.Time_H -= 24;
+                case 1: // UTC时间
+                    if (strlen(token) >= 6) {
+                        // 直接从字符串中提取时间
+                        int time = atoi(token);
+                        GPS.Time_H = (time / 10000) + 8; // UTC+8时区
+                        GPS.Time_M = (time / 100) % 100;
+                        GPS.Time_S = time % 100;
+                        
+                        // 处理跨天情况
+                        if (GPS.Time_H >= 24) {
+                            GPS.Time_H -= 24;
+                        }
                     }
-                }
-                break;
-                
-            case 2: // 定位状态
-                GPS.Status = (token[0] == 'A') ? 1 : 0;
-                break;
-                
-            case 3: // 纬度 (ddmm.mmmm格式)
-                if (strlen(token) > 0) {
-                    // 保存原始格式以供参考
-                    GPS.Lat_Raw = atof(token);
-                    // 转换为十进制度格式
-                    GPS.Lat = convert_nmea_to_decimal(GPS.Lat_Raw);
-                }
-                break;
-                
-            case 4: // 纬度方向
-                if (strlen(token) > 0) {
-                    GPS.Lat_area = token[0];
-                    // 如果是南纬，纬度为负值
-                    if (GPS.Lat_area == 'S') {
-                        GPS.Lat = -GPS.Lat;
-                    }
-                }
-                break;
-                
-            case 5: // 经度 (dddmm.mmmm格式)
-                if (strlen(token) > 0) {
-                    // 保存原始格式以供参考
-                    GPS.Lon_Raw = atof(token);
-                    // 转换为十进制度格式
-                    GPS.Lon = convert_nmea_to_decimal(GPS.Lon_Raw);
-                }
-                break;
-                
-            case 6: // 经度方向
-                if (strlen(token) > 0) {
-                    GPS.Lon_area = token[0];
-                    // 如果是西经，经度为负值
-                    if (GPS.Lon_area == 'W') {
-                        GPS.Lon = -GPS.Lon;
-                    }
-                }
-                break;
-                
-            case 7: // 地面速度（节）
-                if (strlen(token) > 0) {
-                    GPS.Speed = atof(token) * 1.852; // 转换为公里/小时
-                }
-                break;
-                
-            case 8: // 地面航向（度）
-                if (strlen(token) > 0) {
-                    GPS.Course = atof(token);
-                }
-                break;
-                
-            case 9: // 日期 (ddmmyy)
-                if (strlen(token) >= 6) {
-                    // 保存原始日期，格式为DDMMYY
-                    int day = (token[0] - '0') * 10 + (token[1] - '0');
-                    int month = (token[2] - '0') * 10 + (token[3] - '0');
-                    int year = 2000 + (token[4] - '0') * 10 + (token[5] - '0');
+                    break;
                     
-                    // 格式化日期字符串
-                    sprintf(GPS.Date, "%04d-%02d-%02d", year, month, day);
-                }
-                break;
+                case 2: // 纬度 (ddmm.mmmm格式)
+                    if (strlen(token) > 0) {
+                        // 保存原始格式以供参考
+                        GPS.Lat_Raw = atof(token);
+                        // 转换为十进制度格式
+                        GPS.Lat = convert_nmea_to_decimal(GPS.Lat_Raw);
+                    }
+                    break;
+                    
+                case 3: // 纬度方向
+                    if (strlen(token) > 0) {
+                        GPS.Lat_area = token[0];
+                        // 如果是南纬，纬度为负值
+                        if (GPS.Lat_area == 'S') {
+                            GPS.Lat = -GPS.Lat;
+                        }
+                    }
+                    break;
+                    
+                case 4: // 经度 (dddmm.mmmm格式)
+                    if (strlen(token) > 0) {
+                        // 保存原始格式以供参考
+                        GPS.Lon_Raw = atof(token);
+                        // 转换为十进制度格式
+                        GPS.Lon = convert_nmea_to_decimal(GPS.Lon_Raw);
+                    }
+                    break;
+                    
+                case 5: // 经度方向
+                    if (strlen(token) > 0) {
+                        GPS.Lon_area = token[0];
+                        // 如果是西经，经度为负值
+                        if (GPS.Lon_area == 'W') {
+                            GPS.Lon = -GPS.Lon;
+                        }
+                    }
+                    break;
+                    
+                case 6: // 定位质量指示
+                    GPS.Status = (token[0] == '0') ? 0 : 1;
+                    break;
+                    
+                case 9: // 海拔高度
+                    if (strlen(token) > 0) {
+                        GPS.Altitude = atof(token);
+                        if (debug_output) {
+                            printf("提取到高度: %.3f米\n", GPS.Altitude);
+                        }
+                    }
+                    break;
+            }
+            
+            token = strtok(NULL, ",");
+            field++;
         }
         
-        token = strtok(NULL, ",");
-        field++;
+        // 使用之前保存的速度和航向信息，因为GGA语句不包含这些信息
+        GPS.Speed = prev_speed;
+        GPS.Course = prev_course;
+    } else {
+        // 原来的RMC解析逻辑
+        while (token != NULL) {
+            switch (field) {
+                case 0: // RMC标识符
+                    break;
+                    
+                case 1: // UTC时间
+                    if (strlen(token) >= 6) {
+                        // 直接从字符串中提取时间
+                        int time = atoi(token);
+                        GPS.Time_H = (time / 10000) + 8; // UTC+8时区
+                        GPS.Time_M = (time / 100) % 100;
+                        GPS.Time_S = time % 100;
+                        
+                        // 处理跨天情况
+                        if (GPS.Time_H >= 24) {
+                            GPS.Time_H -= 24;
+                        }
+                    }
+                    break;
+                    
+                case 2: // 定位状态
+                    GPS.Status = (token[0] == 'A') ? 1 : 0;
+                    break;
+                    
+                case 3: // 纬度 (ddmm.mmmm格式)
+                    if (strlen(token) > 0) {
+                        // 保存原始格式以供参考
+                        GPS.Lat_Raw = atof(token);
+                        // 转换为十进制度格式
+                        GPS.Lat = convert_nmea_to_decimal(GPS.Lat_Raw);
+                    }
+                    break;
+                    
+                case 4: // 纬度方向
+                    if (strlen(token) > 0) {
+                        GPS.Lat_area = token[0];
+                        // 如果是南纬，纬度为负值
+                        if (GPS.Lat_area == 'S') {
+                            GPS.Lat = -GPS.Lat;
+                        }
+                    }
+                    break;
+                    
+                case 5: // 经度 (dddmm.mmmm格式)
+                    if (strlen(token) > 0) {
+                        // 保存原始格式以供参考
+                        GPS.Lon_Raw = atof(token);
+                        // 转换为十进制度格式
+                        GPS.Lon = convert_nmea_to_decimal(GPS.Lon_Raw);
+                    }
+                    break;
+                    
+                case 6: // 经度方向
+                    if (strlen(token) > 0) {
+                        GPS.Lon_area = token[0];
+                        // 如果是西经，经度为负值
+                        if (GPS.Lon_area == 'W') {
+                            GPS.Lon = -GPS.Lon;
+                        }
+                    }
+                    break;
+                    
+                case 7: // 地面速度（节）
+                    if (strlen(token) > 0) {
+                        GPS.Speed = atof(token) * 1.852; // 转换为公里/小时
+                        // 保存有效的速度值以供后续使用
+                        last_valid_speed = GPS.Speed;
+                    }
+                    break;
+                    
+                case 8: // 地面航向（度）
+                    if (strlen(token) > 0) {
+                        GPS.Course = atof(token);
+                        // 保存有效的航向值以供后续使用
+                        last_valid_course = GPS.Course;
+                    }
+                    break;
+                    
+                case 9: // 日期 (ddmmyy)
+                    if (strlen(token) >= 6) {
+                        // 保存原始日期，格式为DDMMYY
+                        int day = (token[0] - '0') * 10 + (token[1] - '0');
+                        int month = (token[2] - '0') * 10 + (token[3] - '0');
+                        int year = 2000 + (token[4] - '0') * 10 + (token[5] - '0');
+                        
+                        // 格式化日期字符串
+                        sprintf(GPS.Date, "%04d-%02d-%02d", year, month, day);
+                    }
+                    break;
+            }
+            
+            token = strtok(NULL, ",");
+            field++;
+        }
     }
     
     if (debug_output && GPS.Status) {

@@ -65,6 +65,7 @@ typedef struct {
     // 状态指标
     int satellites;      // 卫星数量 (虚拟值，L76X不提供此信息)
     float hdop;          // 水平精度因子 (虚拟值，L76X不提供此信息)
+    float altitude;      // 高度信息(米)
 } extended_gps_data_t;
 
 // 全局GPS数据
@@ -106,7 +107,7 @@ static void draw_gps_ui_frame(void) {
     st7789_draw_string(10, 75, "Baidu Lon:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
     st7789_draw_string(10, 100, "Speed:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
     st7789_draw_string(10, 125, "Course:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
-    st7789_draw_string(10, 150, "Status:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
+    st7789_draw_string(10, 150, "Altitude:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
     st7789_draw_string(10, 175, "Date:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
     st7789_draw_string(10, 200, "Time:", COLOR_LABEL, COLOR_BACKGROUND, FONT_SIZE_LABEL);
 }
@@ -195,8 +196,9 @@ static void update_gps_display(void) {
         snprintf(buffer, sizeof(buffer), "%.1f\xF8", gps_data.course); // \xF8是度数符号
         st7789_draw_string(100, 125, buffer, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
         
-        // 显示定位状态
-        st7789_draw_string(100, 150, "Fixed", COLOR_GOOD, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 显示高度信息替代原来的状态信息
+        snprintf(buffer, sizeof(buffer), "%.1f m", gps_data.altitude);
+        st7789_draw_string(100, 150, buffer, COLOR_GOOD, COLOR_BACKGROUND, FONT_SIZE_VALUE);
         
         // 显示日期
         st7789_draw_string(100, 175, gps_data.datestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
@@ -221,8 +223,8 @@ static void update_gps_display(void) {
         // 显示航向
         st7789_draw_string(100, 125, "0.0\xF8", COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
         
-        // 显示定位状态
-        st7789_draw_string(100, 150, "No Fix", COLOR_WARNING, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 显示高度信息替代原来的状态信息
+        st7789_draw_string(100, 150, "0.0 m", COLOR_WARNING, COLOR_BACKGROUND, FONT_SIZE_VALUE);
         
         // 显示日期和时间（保留时间显示，因为即使未定位也可能有时间数据）
         if (gps_data.datestamp[0] != '\0') {
@@ -285,6 +287,7 @@ static bool update_gps_data_from_module(void) {
             gps_data.longitude = gnrmc_data.Lon;
             gps_data.speed = gnrmc_data.Speed;
             gps_data.course = gnrmc_data.Course;
+            gps_data.altitude = gnrmc_data.Altitude;
             
             // 百度和谷歌坐标
             gps_data.baidu_lat = baidu_coords.Lat;
@@ -336,66 +339,15 @@ static void print_gps_debug_info(bool force_print) {
         // 获取原始GNRMC数据用于打印详细信息
         GNRMC gnrmc_data = vendor_gps_get_gnrmc();
         
-        printf("\n============ GPS数据 [包 #%lu] ============\n", packet_count);
-        
+        // 简化的GPS数据输出
         if (gps_data.fix) {
-            printf("【状态】GPS已定位 ✓ (定位次数: %lu)\n", valid_fix_count);
-            
-            // 打印时间和日期
-            printf("【时间】%s  【日期】%s\n", 
-                   gps_data.timestamp, 
-                   gps_data.datestamp[0] ? gps_data.datestamp : "未知");
-            
-            // 打印原始NMEA格式和转换后的十进制度格式
-            printf("【原始数据】\n");
-            printf("  纬度: %.6f%c → %.6f°\n", 
-                   gnrmc_data.Lat_Raw, gnrmc_data.Lat_area, gnrmc_data.Lat);
-            printf("  经度: %.6f%c → %.6f°\n", 
-                   gnrmc_data.Lon_Raw, gnrmc_data.Lon_area, gnrmc_data.Lon);
-            
-            // 显示速度和航向
-            printf("【航行数据】\n");
-            printf("  速度: %.1f km/h\n  航向: %.1f°\n", 
-                   gps_data.speed, gps_data.course);
-            
-            // 坐标转换结果
-            printf("【坐标转换】\n");
-            printf("  WGS84: %.6f, %.6f\n", 
-                   gps_data.latitude, gps_data.longitude);
-            printf("  Google: %.6f, %.6f\n", 
-                   gps_data.google_lat, gps_data.google_lon);
-            printf("  百度: %.6f, %.6f\n", 
-                   gps_data.baidu_lat, gps_data.baidu_lon);
-            
-            // 输出百度地图链接
-            printf("【百度地图链接】\n  https://api.map.baidu.com/marker?location=%.6f,%.6f&title=GPS&content=当前位置&output=html\n",
-                   gps_data.baidu_lat, gps_data.baidu_lon);
-                   
-            // 显示模拟的卫星数据
-            printf("【卫星数据(模拟)】\n");
-            printf("  卫星数: %d  HDOP: %.1f\n", 
-                   gps_data.satellites, gps_data.hdop);
-                   
+            printf("GPS: 坐标=%0.6f,%0.6f 高度=%.1fm 速度=%.1fkm/h 航向=%.1f°\n", 
+                   gps_data.latitude, gps_data.longitude, 
+                   gps_data.altitude, gps_data.speed, gps_data.course);
         } else {
-            printf("【状态】等待定位... ✗ (已尝试: %lu次)\n", packet_count);
-            printf("【时间】%s\n", gps_data.timestamp);
-            
-            if (enable_debug) {
-                // 显示一些调试信息，即使未定位
-                printf("【原始数据】\n");
-                if (gnrmc_data.Time_H > 0 || gnrmc_data.Time_M > 0 || gnrmc_data.Time_S > 0) {
-                    printf("  接收到时间数据: %02d:%02d:%02d\n", 
-                           gnrmc_data.Time_H, gnrmc_data.Time_M, gnrmc_data.Time_S);
-                }
-                
-                // 显示模拟的卫星数据
-                printf("【卫星数据(模拟)】\n");
-                printf("  卫星数: %d  HDOP: %.1f\n", 
-                       gps_data.satellites, gps_data.hdop);
-            }
+            printf("GPS: 等待定位... 时间=%s\n", gps_data.timestamp);
         }
         
-        printf("==========================================\n");
         last_status = gps_data.fix;
     }
 }
@@ -423,10 +375,16 @@ void vendor_gps_display_demo(void) {
     
     // 发送设置命令 - 配置NMEA输出
     printf("发送NMEA输出配置命令...\n");
+    // 修改命令，同时开启RMC和GGA语句输出
+    // 参数含义: $PMTK314,GLL,RMC,VTG,GGA,GSA,GSV,0,0,0,0,0,0,0,0,0,0,0,0,0
     vendor_gps_send_command("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
     sleep_ms(100);
+    // 设置更新频率为1Hz (1000ms)
     vendor_gps_send_command("$PMTK220,1000");
     sleep_ms(500);
+    
+    printf("注意: 程序已增强，现在可以解析GNRMC/GPRMC或GNGGA/GPGGA语句\n");
+    printf("     速度和航向信息来自RMC语句，坐标信息两种语句都支持\n");
     
     // 为随机数生成器设置种子 (用于模拟卫星信号图)
     srand(time_us_32());
