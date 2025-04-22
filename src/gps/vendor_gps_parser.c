@@ -472,6 +472,9 @@ GNRMC vendor_gps_get_gnrmc() {
                     
                 case 6: // 定位质量指示
                     GPS.Status = (token[0] == '0') ? 0 : 1;
+                    if (debug_output) {
+                        printf("GGA定位质量: %c -> Status=%d\n", token[0], GPS.Status);
+                    }
                     break;
                     
                 case 9: // 海拔高度
@@ -593,6 +596,12 @@ GNRMC vendor_gps_get_gnrmc() {
         printf("GPS定位成功: 纬度=%.6f%c(%.6f°), 经度=%.6f%c(%.6f°)\n", 
               GPS.Lat_Raw, GPS.Lat_area, GPS.Lat,
               GPS.Lon_Raw, GPS.Lon_area, GPS.Lon);
+    }
+    
+    // 输出额外的调试信息
+    if (debug_output) {
+        printf("GPS数据状态: 定位状态=%d, 纬度=%.6f, 经度=%.6f, 数据类型=%s\n", 
+               GPS.Status, GPS.Lat, GPS.Lon, using_gga ? "GGA" : "RMC");
     }
     
     return GPS;
