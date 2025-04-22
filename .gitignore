@@ -1,0 +1,77 @@
+# Build directories
+build/
+_build/
+cmake-build-*/
+
+# Generated files
+*.uf2
+*.bin
+*.dis
+*.hex
+*.elf
+*.map
+
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.ilo
+*.bc
+
+# Linker output
+*.ilk
+*.exp
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+*.lai
+
+# Shared objects
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+CMakeUserPresets.json
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Makefile
+*.cmake
+!pico_sdk_import.cmake
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+.vs/
+.DS_Store
+*.code-workspace
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Log files
+*.log
+
+# User specific files
+pico_sdk_import.cmake
