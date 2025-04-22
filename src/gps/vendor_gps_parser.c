@@ -224,25 +224,59 @@ void vendor_gps_exit_backup_mode() {
 static void vendor_uart_receive_string(char *data, uint16_t Num) {
     uint16_t i = 0;
     
-    // 设置超时时间以避免无限等待
-    absolute_time_t timeout = make_timeout_time_ms(1000);
+    // 确保缓冲区有效
+    if (data == NULL || Num < 2) {
+        if (debug_output) {
+            printf("GPS数据读取错误：无效的缓冲区\n");
+        }
+        return;
+    }
+    
+    // 清空缓冲区开始部分，确保数据干净
+    memset(data, 0, Num > 10 ? 10 : Num);
+    
+    // 设置超时时间以避免无限等待 - 增加到300ms提高获取完整数据的可能性
+    absolute_time_t timeout = make_timeout_time_ms(300);
+    absolute_time_t activity_timeout = make_timeout_time_ms(50); // 50ms无数据则认为传输结束
+    absolute_time_t last_read_time = get_absolute_time();
     
     while (i < Num - 1) {
         if (uart_is_readable(gps_uart)) {
             data[i] = uart_getc(gps_uart);
             i++;
+            // 更新最后读取时间
+            last_read_time = get_absolute_time();
+        } else {
+            // 检查是否已经有一段时间没有数据了，如果是则可能传输已结束
+            if (i > 10 && absolute_time_diff_us(last_read_time, get_absolute_time()) > 50000) {
+                if (debug_output) {
+                    printf("GPS数据读取完成：50ms内无新数据\n");
+                }
+                break;
+            }
         }
         
-        // 检查超时
+        // 检查总超时
         if (time_reached(timeout)) {
+            if (debug_output) {
+                printf("GPS数据读取超时，读取了%d字节\n", i);
+            }
             break;
         }
         
-        // 短暂休眠以避免忙等待
+        // 短暂休眠以避免忙等待 - 减少CPU占用但保持响应性
         sleep_us(10);
     }
     
-    data[i] = '\0'; // 确保字符串以null结尾
+    // 确保数据以NULL结束，并检查是否有完整的NMEA语句
+    data[i] = '\0';
+    
+    // 检查获取的数据是否有效
+    if (i < 10) {
+        if (debug_output && i > 0) {
+            printf("GPS数据太短，可能无效：%s\n", data);
+        }
+    }
 }
 
 /******************************************************************************
@@ -274,23 +308,28 @@ GNRMC vendor_gps_get_gnrmc() {
     
     // 重置GPS状态
     GPS.Status = 0;
-    GPS.Time_H = 0;
-    GPS.Time_M = 0;
-    GPS.Time_S = 0;
     
-    // 保存之前的速度和航向，避免GGA语句解析时丢失
+    // 保存之前的时间信息，避免重置导致时间显示闪烁
+    uint8_t prev_time_h = GPS.Time_H;
+    uint8_t prev_time_m = GPS.Time_M;
+    uint8_t prev_time_s = GPS.Time_S;
+    char prev_date[11];
+    strncpy(prev_date, GPS.Date, sizeof(prev_date)-1);
+    prev_date[sizeof(prev_date)-1] = '\0';
+    
+    // 保存之前的位置和速度信息
+    double prev_lat = GPS.Lat;
+    double prev_lon = GPS.Lon;
     double prev_speed = GPS.Speed;
     double prev_course = GPS.Course;
-    double prev_altitude = GPS.Altitude; // 保存之前的高度值
+    double prev_altitude = GPS.Altitude;
     
-    // 初始化速度和航向（使用之前保存的值）
-    GPS.Speed = prev_speed;
-    GPS.Course = prev_course;
-    GPS.Altitude = prev_altitude; // 初始化高度值
-    
-    // 清除经纬度
+    // 临时重置除时间外的其他值，等待新数据更新
     GPS.Lat = 0.0;
     GPS.Lon = 0.0;
+    GPS.Speed = prev_speed;  // 保留上次速度，避免速度显示闪烁
+    GPS.Course = prev_course;  // 保留上次航向
+    GPS.Altitude = prev_altitude;  // 保留上次高度值
     
     // 使用厂商原始代码的接收方式获取NMEA数据流
     vendor_uart_receive_string(buff_t, BUFFSIZE);
@@ -322,7 +361,15 @@ GNRMC vendor_gps_get_gnrmc() {
             if (debug_output) {
                 printf("未找到RMC或GGA语句\n");
             }
-            return GPS; // 未找到任何支持的语句，返回空数据
+            
+            // 如果没有找到有效语句，保留之前的时间信息避免闪烁
+            GPS.Time_H = prev_time_h;
+            GPS.Time_M = prev_time_m;
+            GPS.Time_S = prev_time_s;
+            strncpy(GPS.Date, prev_date, sizeof(GPS.Date)-1);
+            GPS.Date[sizeof(GPS.Date)-1] = '\0';
+            
+            return GPS; // 未找到任何支持的语句，返回上次的数据
         }
     }
     

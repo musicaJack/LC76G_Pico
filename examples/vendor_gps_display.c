@@ -24,6 +24,9 @@
 #define GPS_FORCE_PIN  4          // GPIO4 (FORCE pin)
 #define GPS_BAUD_RATE  115200     // GPS模块波特率设置为115200
 
+// GPS数据验证设置
+#define GPS_VALID_COORD_THRESHOLD 1.0  // 有效GPS坐标必须大于此值
+
 // 颜色定义 - 除标准颜色外的扩展配色
 #define COLOR_BACKGROUND   0x0841  // 深蓝色背景
 #define COLOR_TITLE        0xFFFF  // 白色标题
@@ -173,75 +176,137 @@ static void draw_empty_satellite_signal(void) {
  */
 static void update_gps_display(void) {
     char buffer[64]; // 字符缓冲区
+    static char prev_lat[20] = {0};
+    static char prev_lon[20] = {0};
+    static char prev_speed[20] = {0};
+    static char prev_course[20] = {0};
+    static char prev_altitude[20] = {0};
+    static char prev_date[20] = {0};
+    static char prev_time[20] = {0};
+    static bool prev_fix_state = false;
     
-    // 擦除显示的旧值区域
-    st7789_fill_rect(100, 40, 130, 170, COLOR_BACKGROUND);
+    // 准备新的数据字符串
+    char new_lat[20], new_lon[20], new_speed[20], new_course[20], new_altitude[20];
+    
+    // 无论是否定位，都确保显示信号格边框
+    if (packet_count <= 1 || (prev_fix_state != gps_data.fix && !gps_data.fix)) {
+        // 首次显示或从有定位变为无定位时，绘制空的信号格
+        draw_empty_satellite_signal();
+    } else if (prev_fix_state != gps_data.fix && gps_data.fix) {
+        // 从无定位变为有定位时，绘制信号强度
+        draw_satellite_signal(gps_data.satellites);
+    }
     
     if (gps_data.fix) {
-        // 当定位有效时显示实际值
+        // 准备新数据字符串
+        snprintf(new_lat, sizeof(new_lat), "%.6f", gps_data.baidu_lat);
+        snprintf(new_lon, sizeof(new_lon), "%.6f", gps_data.baidu_lon);
+        snprintf(new_speed, sizeof(new_speed), "%.1f km/h", gps_data.speed);
+        snprintf(new_course, sizeof(new_course), "%.1f\xF8", gps_data.course);
+        snprintf(new_altitude, sizeof(new_altitude), "%.1f m", gps_data.altitude);
         
-        // 显示百度地图纬度
-        snprintf(buffer, sizeof(buffer), "%.6f", gps_data.baidu_lat);
-        st7789_draw_string(100, 50, buffer, COLOR_BAIDU, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 颜色设置：定位成功时使用正常颜色
+        uint16_t lat_lon_color = COLOR_BAIDU;
+        uint16_t value_color = COLOR_VALUE;
+        uint16_t altitude_color = COLOR_GOOD;
         
-        // 显示百度地图经度
-        snprintf(buffer, sizeof(buffer), "%.6f", gps_data.baidu_lon);
-        st7789_draw_string(100, 75, buffer, COLOR_BAIDU, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 只有当值变化或状态改变时才更新显示
+        if (strcmp(new_lat, prev_lat) != 0 || prev_fix_state != gps_data.fix) {
+            // 用背景色擦除旧值
+            st7789_fill_rect(100, 50, 130, 18, COLOR_BACKGROUND);
+            // 显示新值
+            st7789_draw_string(100, 50, new_lat, lat_lon_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_lat, new_lat);
+        }
         
-        // 显示速度
-        snprintf(buffer, sizeof(buffer), "%.1f km/h", gps_data.speed);
-        st7789_draw_string(100, 100, buffer, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        if (strcmp(new_lon, prev_lon) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 75, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 75, new_lon, lat_lon_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_lon, new_lon);
+        }
         
-        // 显示航向
-        snprintf(buffer, sizeof(buffer), "%.1f\xF8", gps_data.course); // \xF8是度数符号
-        st7789_draw_string(100, 125, buffer, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        if (strcmp(new_speed, prev_speed) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 100, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 100, new_speed, value_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_speed, new_speed);
+        }
         
-        // 显示高度信息替代原来的状态信息
-        snprintf(buffer, sizeof(buffer), "%.1f m", gps_data.altitude);
-        st7789_draw_string(100, 150, buffer, COLOR_GOOD, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        if (strcmp(new_course, prev_course) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 125, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 125, new_course, value_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_course, new_course);
+        }
         
-        // 显示日期
-        st7789_draw_string(100, 175, gps_data.datestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 显示时间
-        st7789_draw_string(100, 200, gps_data.timestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 更新卫星信号图（有实际信号强度）
-        draw_satellite_signal(gps_data.satellites);
+        if (strcmp(new_altitude, prev_altitude) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 150, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 150, new_altitude, altitude_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_altitude, new_altitude);
+        }
     } else {
-        // 当定位无效时显示零值
+        // 无定位时也显示零值
+        snprintf(new_lat, sizeof(new_lat), "0.000000");
+        snprintf(new_lon, sizeof(new_lon), "0.000000");
+        snprintf(new_speed, sizeof(new_speed), "0.0 km/h");
+        snprintf(new_course, sizeof(new_course), "0.0\xF8");
+        snprintf(new_altitude, sizeof(new_altitude), "0.0 m");
         
-        // 显示百度地图纬度
-        st7789_draw_string(100, 50, "0.000000", COLOR_BAIDU, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 颜色设置：无定位时使用警告色
+        uint16_t lat_lon_color = COLOR_BAIDU;
+        uint16_t value_color = COLOR_VALUE;
+        uint16_t altitude_color = COLOR_WARNING;
         
-        // 显示百度地图经度
-        st7789_draw_string(100, 75, "0.000000", COLOR_BAIDU, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 显示速度
-        st7789_draw_string(100, 100, "0.0 km/h", COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 显示航向
-        st7789_draw_string(100, 125, "0.0\xF8", COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 显示高度信息替代原来的状态信息
-        st7789_draw_string(100, 150, "0.0 m", COLOR_WARNING, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        
-        // 显示日期和时间（保留时间显示，因为即使未定位也可能有时间数据）
-        if (gps_data.datestamp[0] != '\0') {
-            st7789_draw_string(100, 175, gps_data.datestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        } else {
-            st7789_draw_string(100, 175, "0000-00-00", COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        // 只有当值变化或状态改变时才更新显示
+        if (strcmp(new_lat, prev_lat) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 50, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 50, new_lat, lat_lon_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_lat, new_lat);
         }
         
-        if (gps_data.timestamp[0] != '\0') {
-            st7789_draw_string(100, 200, gps_data.timestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
-        } else {
-            st7789_draw_string(100, 200, "00:00:00", COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        if (strcmp(new_lon, prev_lon) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 75, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 75, new_lon, lat_lon_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_lon, new_lon);
         }
         
-        // 显示空的信号格（不完全清除，而是显示空格）
-        draw_empty_satellite_signal();
+        if (strcmp(new_speed, prev_speed) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 100, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 100, new_speed, value_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_speed, new_speed);
+        }
+        
+        if (strcmp(new_course, prev_course) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 125, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 125, new_course, value_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_course, new_course);
+        }
+        
+        if (strcmp(new_altitude, prev_altitude) != 0 || prev_fix_state != gps_data.fix) {
+            st7789_fill_rect(100, 150, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 150, new_altitude, altitude_color, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            strcpy(prev_altitude, new_altitude);
+        }
     }
+    
+    // 日期通常不会频繁变化 - 强制显示日期，即使是默认值
+    if (strcmp(gps_data.datestamp, prev_date) != 0 || strlen(prev_date) == 0) {
+        st7789_fill_rect(100, 175, 130, 18, COLOR_BACKGROUND);
+        st7789_draw_string(100, 175, gps_data.datestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        strcpy(prev_date, gps_data.datestamp);
+        
+        if (enable_debug) {
+            printf("显示日期: %s\n", gps_data.datestamp);
+        }
+    }
+    
+    // 时间每秒变化一次
+    if (strcmp(gps_data.timestamp, prev_time) != 0) {
+        st7789_fill_rect(100, 200, 130, 18, COLOR_BACKGROUND);
+        st7789_draw_string(100, 200, gps_data.timestamp, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+        strcpy(prev_time, gps_data.timestamp);
+    }
+    
+    // 更新定位状态跟踪变量
+    prev_fix_state = gps_data.fix;
 }
 
 /**
@@ -250,75 +315,176 @@ static void update_gps_display(void) {
  */
 static bool update_gps_data_from_module(void) {
     bool got_valid_data = false;
+    bool got_time_data = false;
+    
+    // 防止意外情况：设置一个标志位，以便在处理过程中如果出现异常可以恢复
+    static bool is_recovering = false;
+    static uint32_t last_recovery_time = 0;
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    
+    // 如果之前发生了错误，并且还在恢复期间（5秒内）
+    if (is_recovering && (current_time - last_recovery_time < 5000)) {
+        // 还在恢复期间，继续使用上次的数据
+        sleep_ms(100);
+        return false;
+    } else {
+        // 恢复期结束或未处于恢复状态
+        is_recovering = false;
+    }
     
     // 尝试多次获取GPS数据，直到找到有效的RMC语句
-    int max_attempts = 5;
+    int max_attempts = 3; // 减少尝试次数，避免长时间阻塞
     GNRMC gnrmc_data = {0};
     
     for (int i = 0; i < max_attempts; i++) {
-        // 获取GPS基础数据
-        gnrmc_data = vendor_gps_get_gnrmc();
-        
-        // 检查是否获取到有效数据
-        if (gnrmc_data.Status == 1 || (gnrmc_data.Time_H > 0 || gnrmc_data.Time_M > 0 || gnrmc_data.Time_S > 0)) {
-            got_valid_data = true;
-            break;
+        // 添加异常处理，防止vendor_gps_get_gnrmc可能引起的异常
+        try {
+            // 获取GPS基础数据
+            gnrmc_data = vendor_gps_get_gnrmc();
+            
+            // 检查是否获取到有效时间数据
+            if (gnrmc_data.Time_H > 0 || gnrmc_data.Time_M > 0 || gnrmc_data.Time_S > 0) {
+                got_time_data = true;
+                
+                // 检查是否获取到有效定位数据
+                // 严格验证坐标：经纬度绝对值必须大于1才视为有效坐标
+                // 这可以过滤掉室内无信号时的无效数据
+                if (gnrmc_data.Status == 1 && 
+                    fabs(gnrmc_data.Lat) > GPS_VALID_COORD_THRESHOLD && 
+                    fabs(gnrmc_data.Lon) > GPS_VALID_COORD_THRESHOLD) {
+                    got_valid_data = true;
+                    break;
+                }
+            }
+        } catch (...) {
+            // 捕获任何异常
+            if (enable_debug) {
+                printf("GPS数据获取发生异常，重试中...\n");
+            }
+            is_recovering = true;
+            last_recovery_time = current_time;
+            sleep_ms(200); // 等待一小段时间后再尝试
+            continue;
         }
         
         // 如果没有获取到有效数据，短暂等待后再尝试
-        sleep_ms(100);
+        sleep_ms(50); // 减少等待时间，提高响应性
     }
     
     // 递增包计数
     packet_count++;
     
-    if (got_valid_data) {
-        // 获取转换后的坐标
-        Coordinates baidu_coords = vendor_gps_get_baidu_coordinates();
-        Coordinates google_coords = vendor_gps_get_google_coordinates();
+    // 更新时间和日期 - 只要获取到了有效时间就更新
+    if (got_time_data) {
+        try {
+            // 获取转换后的坐标
+            Coordinates baidu_coords = vendor_gps_get_baidu_coordinates();
+            Coordinates google_coords = vendor_gps_get_google_coordinates();
+            
+            // 判断是否成功定位 - 增加严格验证
+            bool has_fix = (gnrmc_data.Status == 1 && 
+                            fabs(gnrmc_data.Lat) > GPS_VALID_COORD_THRESHOLD && 
+                            fabs(gnrmc_data.Lon) > GPS_VALID_COORD_THRESHOLD);
+            
+            // 总是更新时间信息，无论是否成功定位
+            sprintf(gps_data.timestamp, "%02d:%02d:%02d", 
+                    gnrmc_data.Time_H, gnrmc_data.Time_M, gnrmc_data.Time_S);
+            
+            // 更新日期信息（如果有）
+            if (gnrmc_data.Date[0] != '\0') {
+                strcpy(gps_data.datestamp, gnrmc_data.Date);
+                if (enable_debug) {
+                    printf("已获取GPS日期: %s\n", gps_data.datestamp);
+                }
+            } else if (gps_data.datestamp[0] == '\0') {
+                // 只有在GPS模块还没有提供日期且本地日期为空时才使用默认值
+                strcpy(gps_data.datestamp, "0000-00-00");
+                if (enable_debug) {
+                    printf("未检测到GPS日期，使用默认值\n");
+                }
+            }
+            
+            if (has_fix) {
+                // 额外调试信息，显示验证过的坐标
+                if (enable_debug) {
+                    printf("验证的有效坐标: 纬度=%0.6f, 经度=%0.6f\n", gnrmc_data.Lat, gnrmc_data.Lon);
+                }
+                
+                // 成功定位时更新位置数据
+                gps_data.latitude = gnrmc_data.Lat;
+                gps_data.longitude = gnrmc_data.Lon;
+                gps_data.speed = gnrmc_data.Speed;
+                gps_data.course = gnrmc_data.Course;
+                gps_data.altitude = gnrmc_data.Altitude;
+                
+                // 百度和谷歌坐标
+                gps_data.baidu_lat = baidu_coords.Lat;
+                gps_data.baidu_lon = baidu_coords.Lon;
+                gps_data.google_lat = google_coords.Lat;
+                gps_data.google_lon = google_coords.Lon;
+                
+                // L76X不提供卫星数量和HDOP，使用模拟值
+                gps_data.satellites = 6 + (rand() % 3); // 减少最大卫星数以适应显示
+                gps_data.hdop = 0.8 + (rand() % 16) / 10.0;
+                
+                valid_fix_count++;
+            } else {
+                // 未定位或坐标无效时，打印调试信息
+                if (enable_debug && gnrmc_data.Status == 1) {
+                    printf("警告: GPS模块报告定位成功但坐标无效 (纬度=%0.6f, 经度=%0.6f)\n", 
+                        gnrmc_data.Lat, gnrmc_data.Lon);
+                }
+                
+                // 未定位时，所有位置数据清零
+                gps_data.latitude = 0.0;
+                gps_data.longitude = 0.0;
+                gps_data.speed = 0.0;
+                gps_data.course = 0.0;
+                gps_data.altitude = 0.0;
+                gps_data.baidu_lat = 0.0;
+                gps_data.baidu_lon = 0.0;
+                gps_data.google_lat = 0.0;
+                gps_data.google_lon = 0.0;
+                
+                // 未定位时，卫星数量和HDOP设为低值
+                gps_data.satellites = 2 + (rand() % 2);
+                gps_data.hdop = 2.5 + (rand() % 20) / 10.0;
+            }
+            
+            // 更新定位状态
+            gps_data.fix = has_fix;
+        } catch (...) {
+            // 捕获任何异常
+            if (enable_debug) {
+                printf("GPS数据处理发生异常\n");
+            }
+            is_recovering = true;
+            last_recovery_time = current_time;
+        }
+    } else {
+        // 如果连时间都没有获取到，再确保所有值为0
+        if (gps_data.timestamp[0] == '\0') {
+            strcpy(gps_data.timestamp, "00:00:00");
+        }
+        // 注意：不覆盖已有的时间和日期值，这样可以保持最后一次获取到的有效时间
         
-        // 判断是否成功定位
-        bool has_fix = (gnrmc_data.Status == 1);
-        
-        // 只在成功定位时更新位置数据
-        if (has_fix) {
-            // 更新GPS数据结构中的位置信息
-            gps_data.latitude = gnrmc_data.Lat;
-            gps_data.longitude = gnrmc_data.Lon;
-            gps_data.speed = gnrmc_data.Speed;
-            gps_data.course = gnrmc_data.Course;
-            gps_data.altitude = gnrmc_data.Altitude;
-            
-            // 百度和谷歌坐标
-            gps_data.baidu_lat = baidu_coords.Lat;
-            gps_data.baidu_lon = baidu_coords.Lon;
-            gps_data.google_lat = google_coords.Lat;
-            gps_data.google_lon = google_coords.Lon;
-            
-            // L76X不提供卫星数量和HDOP，使用模拟值
-            gps_data.satellites = 6 + (rand() % 3); // 减少最大卫星数以适应显示
-            gps_data.hdop = 0.8 + (rand() % 16) / 10.0;
-            
-            valid_fix_count++;
-        } else {
-            // 未定位时，卫星数量和HDOP设为低值
-            gps_data.satellites = 2 + (rand() % 2);
-            gps_data.hdop = 2.5 + (rand() % 20) / 10.0;
+        if (gps_data.datestamp[0] == '\0') {
+            strcpy(gps_data.datestamp, "0000-00-00");
         }
         
-        // 更新定位状态
-        gps_data.fix = has_fix;
-        
-        // 总是更新时间和日期信息，即使未定位
-        sprintf(gps_data.timestamp, "%02d:%02d:%02d", 
-                gnrmc_data.Time_H, gnrmc_data.Time_M, gnrmc_data.Time_S);
-        
-        // 确保日期字符串有内容
-        if (gnrmc_data.Date[0] != '\0') {
-            strcpy(gps_data.datestamp, gnrmc_data.Date);
-        } else if (gps_data.datestamp[0] == '\0') {
-            // 如果没有日期数据，使用默认值
-            strcpy(gps_data.datestamp, "2025-04-22");
+        // 如果既没获取到定位数据也没获取到时间数据，标记为未定位
+        if (!gps_data.fix) {
+            gps_data.latitude = 0.0;
+            gps_data.longitude = 0.0;
+            gps_data.speed = 0.0;
+            gps_data.course = 0.0;
+            gps_data.altitude = 0.0;
+            gps_data.baidu_lat = 0.0;
+            gps_data.baidu_lon = 0.0;
+            gps_data.google_lat = 0.0;
+            gps_data.google_lon = 0.0;
+            gps_data.satellites = 0;
+            gps_data.hdop = 0.0;
         }
     }
     
@@ -341,11 +507,13 @@ static void print_gps_debug_info(bool force_print) {
         
         // 简化的GPS数据输出
         if (gps_data.fix) {
-            printf("GPS: 坐标=%0.6f,%0.6f 高度=%.1fm 速度=%.1fkm/h 航向=%.1f°\n", 
+            printf("GPS: 坐标=%0.6f,%0.6f 高度=%.1fm 速度=%.1fkm/h 航向=%.1f° 时间=%s\n", 
                    gps_data.latitude, gps_data.longitude, 
-                   gps_data.altitude, gps_data.speed, gps_data.course);
+                   gps_data.altitude, gps_data.speed, gps_data.course,
+                   gps_data.timestamp);
         } else {
-            printf("GPS: 等待定位... 时间=%s\n", gps_data.timestamp);
+            printf("GPS: 等待定位... 时间=%s 日期=%s\n", 
+                   gps_data.timestamp, gps_data.datestamp);
         }
         
         last_status = gps_data.fix;
@@ -375,10 +543,11 @@ void vendor_gps_display_demo(void) {
     
     // 发送设置命令 - 配置NMEA输出
     printf("发送NMEA输出配置命令...\n");
-    // 修改命令，同时开启RMC和GGA语句输出
-    // 参数含义: $PMTK314,GLL,RMC,VTG,GGA,GSA,GSV,0,0,0,0,0,0,0,0,0,0,0,0,0
+    
+    // 修改命令，同时开启RMC和GGA语句输出，提高输出频率
     vendor_gps_send_command("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
     sleep_ms(100);
+    
     // 设置更新频率为1Hz (1000ms)
     vendor_gps_send_command("$PMTK220,1000");
     sleep_ms(500);
@@ -403,41 +572,168 @@ void vendor_gps_display_demo(void) {
     }
     
     // 主循环
-    uint32_t last_update = 0;
-    uint32_t last_blink = 0;
+    uint32_t last_gps_update = 0;    // GPS数据更新计时器
+    uint32_t last_time_update = 0;   // 时间显示更新计时器
+    uint32_t last_blink = 0;         // 指示灯闪烁计时器
+    uint32_t last_watchdog = 0;      // 看门狗计时器
     bool indicator_on = false;
+    
+    // 手动更新时间显示的变量 - 使用当前系统时间作为初始值
+    uint8_t second = 0;
+    uint8_t minute = 0;
+    uint8_t hour = 8;  // 默认从8点开始
+    
+    // 获取当前GPS时间（如果有）
+    GNRMC gnrmc_data = vendor_gps_get_gnrmc();
+    if (gnrmc_data.Time_H > 0 || gnrmc_data.Time_M > 0 || gnrmc_data.Time_S > 0) {
+        second = gnrmc_data.Time_S;
+        minute = gnrmc_data.Time_M;
+        hour = gnrmc_data.Time_H;
+    }
+    
+    // 系统健康计数器
+    uint32_t health_counter = 0;
+    bool system_healthy = true;
     
     while (true) {
         uint32_t current_time = to_ms_since_boot(get_absolute_time());
         
-        // 每0.5秒尝试更新一次GPS数据（增加采样频率，提高捕获RMC语句的概率）
-        if (current_time - last_update >= 500) {
-            // 从GPS模块获取数据
-            bool got_data = update_gps_data_from_module();
+        // 监控系统健康状态 - 每10秒检查一次
+        if (current_time - last_watchdog >= 10000) {
+            health_counter++;
+            system_healthy = true; // 重置健康状态
             
-            // 打印调试信息到串口
-            print_gps_debug_info(false);
+            if (enable_debug) {
+                printf("系统健康检查 #%lu：正常运行\n", health_counter);
+            }
             
-            // 更新LCD显示
-            update_gps_display();
+            // UART重新初始化 - 每10分钟执行一次
+            if (health_counter % 60 == 0) {
+                printf("执行UART重新初始化...\n");
+                
+                // 重新初始化GPS
+                vendor_gps_init(GPS_UART_ID, GPS_BAUD_RATE, GPS_TX_PIN, GPS_RX_PIN, GPS_FORCE_PIN);
+                
+                // 重新发送配置命令
+                vendor_gps_send_command("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
+                sleep_ms(50);
+                vendor_gps_send_command("$PMTK220,1000");
+                sleep_ms(50);
+            }
             
-            last_update = current_time;
+            last_watchdog = current_time;
         }
         
-        // 绘制GPS活动指示器闪烁 (右上角)
-        if (current_time - last_blink >= 500) {
+        // 每1秒更新一次GPS数据
+        if (current_time - last_gps_update >= 1000) {
+            // 设置一个最大超时,防止update_gps_data_from_module阻塞太久
+            absolute_time_t gps_update_timeout = make_timeout_time_ms(500);
+            
+            try {
+                // 从GPS模块获取数据
+                bool got_data = update_gps_data_from_module();
+                
+                // 同步本地时间变量（如果获取到有效时间）
+                if (got_data) {
+                    GNRMC gnrmc_data = vendor_gps_get_gnrmc();
+                    if (gnrmc_data.Time_H > 0 || gnrmc_data.Time_M > 0 || gnrmc_data.Time_S > 0) {
+                        second = gnrmc_data.Time_S;
+                        minute = gnrmc_data.Time_M;
+                        hour = gnrmc_data.Time_H;
+                    }
+                }
+                
+                // 打印调试信息到串口
+                print_gps_debug_info(false);
+                
+                // 更新LCD显示
+                update_gps_display();
+            } catch (...) {
+                // 捕获任何异常
+                if (enable_debug) {
+                    printf("GPS更新过程发生异常\n");
+                }
+                
+                system_healthy = false;
+            }
+            
+            // 如果GPS更新超时或发生异常，回退到安全状态
+            if (time_reached(gps_update_timeout) || !system_healthy) {
+                if (enable_debug) {
+                    printf("GPS数据更新超时或出错，使用本地时间\n");
+                }
+                
+                // 使用本地时钟更新时间显示
+                char new_time[9]; // HH:MM:SS
+                sprintf(new_time, "%02d:%02d:%02d", hour, minute, second);
+                st7789_fill_rect(100, 200, 130, 18, COLOR_BACKGROUND);
+                st7789_draw_string(100, 200, new_time, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            }
+            
+            last_gps_update = current_time;
+        }
+        
+        // 每秒更新一次时间显示 - 自行维护时间
+        if (current_time - last_time_update >= 1000) {
+            // 更新本地时间
+            second++;
+            if (second >= 60) {
+                second = 0;
+                minute++;
+                if (minute >= 60) {
+                    minute = 0;
+                    hour++;
+                    if (hour >= 24) {
+                        hour = 0;
+                    }
+                }
+            }
+            
+            // 格式化时间字符串
+            char new_time[9]; // HH:MM:SS
+            sprintf(new_time, "%02d:%02d:%02d", hour, minute, second);
+            
+            // 更新时间显示
+            st7789_fill_rect(100, 200, 130, 18, COLOR_BACKGROUND);
+            st7789_draw_string(100, 200, new_time, COLOR_VALUE, COLOR_BACKGROUND, FONT_SIZE_VALUE);
+            
+            if (enable_debug) {
+                printf("本地时间更新: %s\n", new_time);
+            }
+            
+            last_time_update = current_time;
+        }
+        
+        // 绘制GPS活动指示器闪烁 (右上角)，每秒闪烁一次
+        if (current_time - last_blink >= 1000) {  // 每秒更新一次
+            // 切换指示器状态
             indicator_on = !indicator_on;
             
-            if (indicator_on) {
-                st7789_fill_circle(SCREEN_WIDTH - 15, 15, 5, gps_data.fix ? COLOR_GOOD : COLOR_WARNING);
-            } else {
-                st7789_fill_circle(SCREEN_WIDTH - 15, 15, 5, ST7789_BLUE);
+            // 打印调试信息
+            if (enable_debug) {
+                printf("指示灯状态: %s, 时间差: %lu ms\n", 
+                    indicator_on ? "开" : "关", current_time - last_blink);
             }
+            
+            // 根据定位状态和当前指示器状态选择颜色
+            uint16_t indicator_color;
+            if (indicator_on) {
+                // 确保严格验证GPS数据有效性，经纬度必须大于1才能显示绿灯
+                // 这里使用结构体中的值判断，而不仅仅使用fix标志
+                bool valid_coordinates = (fabs(gps_data.latitude) > GPS_VALID_COORD_THRESHOLD && fabs(gps_data.longitude) > GPS_VALID_COORD_THRESHOLD);
+                indicator_color = (gps_data.fix && valid_coordinates) ? COLOR_GOOD : COLOR_WARNING;
+            } else {
+                indicator_color = ST7789_BLUE;
+            }
+            
+            // 绘制指示器
+            st7789_fill_circle(SCREEN_WIDTH - 15, 15, 5, indicator_color);
             
             last_blink = current_time;
         }
         
-        sleep_ms(50); // 降低CPU占用，但保持较高的响应性
+        // 缩短睡眠时间，提高对闪烁计时器的响应性
+        sleep_ms(1); // 最小休眠时间，确保最高响应性
     }
 }
 
