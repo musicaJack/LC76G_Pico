@@ -10,6 +10,8 @@ English | [中文](README.zh.md)
 
 LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico microcontroller and the L76X GPS module. This project provides a complete solution for retrieving, processing, and displaying GPS data, making it ideal for location tracking applications, navigation systems, and IoT devices requiring geospatial functionality.
 
+![Running Effect](img/hardware1-2.jpg)
+
 ## Features
 
 - **Comprehensive GPS Data Processing**: Accurately extracts and processes geographic coordinates, altitude, speed, and course information from NMEA sentences.
@@ -29,6 +31,8 @@ LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico
 - Power supply (USB or battery)
 
 ## Wiring Diagram
+
+![Hardware Connection](img/hardware1-1.jpg)
 
 ```
 ┌─────────────────┐                  ┌─────────────────┐
