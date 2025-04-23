@@ -36,10 +36,10 @@ LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico
 │  Raspberry Pi   │                  │    L76X GPS     │
 │     Pico        │                  │     Module      │
 │                 │                  │                 │
-│  GPIO 0 (TX)    │────────────────→│  RX             │
-│  GPIO 1 (RX)    │←────────────────│  TX             │
-│  VCC            │────────────────→│  VCC            │
-│  GND            │←───────────────→│  GND            │
+│  GPIO 0 (TX)    │─────────────────→│  RX             │
+│  GPIO 1 (RX)    │←─────────────────│  TX             │
+│  VCC            │─────────────────→│  VCC            │
+│  GND            │←────────────────→│  GND            │
 │                 │                  │                 │
 └─────────────────┘                  └─────────────────┘
 ```
@@ -74,6 +74,8 @@ cd LC76G_Pico
 export PICO_SDK_PATH=/path/to/pico-sdk
 ```
 
+### Building on Linux/macOS
+
 3. Build the project:
 ```bash
 mkdir build
@@ -82,7 +84,36 @@ cmake ..
 make
 ```
 
-4. Upload to your Pico:
+### Building on Windows
+
+3. Set up the Pico SDK path in Windows:
+```cmd
+set PICO_SDK_PATH=C:\path\to\pico-sdk
+```
+
+4. Option 1: Build using the provided batch file:
+```cmd
+build_pico.bat
+```
+This script will automatically:
+- Clean any previous build files
+- Create a build directory
+- Configure the project with CMake using MinGW Makefiles
+- Build the project using MinGW Make
+
+5. Option 2: Manual build on Windows:
+```cmd
+mkdir build
+cd build
+cmake .. -G "MinGW Makefiles"
+mingw32-make -j8
+```
+
+> **Note**: Ensure you have MinGW installed and added to your system PATH. For Windows, it's recommended to use the [official Raspberry Pi Pico setup guide](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf) to configure your development environment.
+
+### Upload to Pico
+
+After building the project, upload to your Pico:
    - Press and hold the BOOTSEL button on the Pico
    - Connect it to your computer while holding the button
    - Release the button after connecting

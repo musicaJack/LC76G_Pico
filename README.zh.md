@@ -36,10 +36,10 @@ LC76G_Pico 是一个基于 Raspberry Pi Pico 微控制器和 L76X GPS 模块的�
 │  Raspberry Pi   │                  │    L76X GPS     │
 │     Pico        │                  │     模块        │
 │                 │                  │                 │
-│  GPIO 0 (TX)    │────────────────→│  RX             │
-│  GPIO 1 (RX)    │←────────────────│  TX             │
-│  VCC            │────────────────→│  VCC            │
-│  GND            │←───────────────→│  GND            │
+│  GPIO 0 (TX)    │─────────────────→│  RX             │
+│  GPIO 1 (RX)    │←─────────────────│  TX             │
+│  VCC            │─────────────────→│  VCC            │
+│  GND            │←────────────────→│  GND            │
 │                 │                  │                 │
 └─────────────────┘                  └─────────────────┘
 ```
@@ -74,6 +74,8 @@ cd LC76G_Pico
 export PICO_SDK_PATH=/path/to/pico-sdk
 ```
 
+### 在 Linux/macOS 上构建
+
 3. 构建项目：
 ```bash
 mkdir build
@@ -82,7 +84,36 @@ cmake ..
 make
 ```
 
-4. 上传到您的 Pico：
+### 在 Windows 上构建
+
+3. 在 Windows 上设置 Pico SDK 路径：
+```cmd
+set PICO_SDK_PATH=C:\path\to\pico-sdk
+```
+
+4. 选项1：使用提供的批处理文件构建：
+```cmd
+build_pico.bat
+```
+此脚本将自动：
+- 清理之前的构建文件
+- 创建构建目录
+- 使用 MinGW Makefiles 通过 CMake 配置项目
+- 使用 MinGW Make 构建项目
+
+5. 选项2：在 Windows 上手动构建：
+```cmd
+mkdir build
+cd build
+cmake .. -G "MinGW Makefiles"
+mingw32-make -j8
+```
+
+> **注意**：确保已安装 MinGW 并将其添加到系统 PATH 中。对于 Windows，建议使用[官方 Raspberry Pi Pico 设置指南](https://datasheets.raspberrypi.org/pico/getting-started-with-pico.pdf)配置您的开发环境。
+
+### 上传到 Pico
+
+构建项目后，上传到您的 Pico：
    - 按住 Pico 上的 BOOTSEL 按钮
    - 按住按钮的同时将其连接到计算机
    - 连接后释放按钮

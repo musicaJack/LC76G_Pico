@@ -1,6 +1,6 @@
 /**
  * @file vendor_gps_parser.h
- * @brief 厂商提供的GPS解析功能的移植
+ * @brief Porting of vendor-provided GPS parsing functionality
  */
 
 #ifndef VENDOR_GPS_PARSER_H
@@ -10,76 +10,76 @@
 #include <stdbool.h>
 #include "pico/stdlib.h"
 
-// 原始厂商代码的数据结构，增强版
+// Original vendor code data structure, enhanced version
 typedef struct {
-    // 原始结构
-    double Lon;         // 经度（十进制度格式）
-    double Lat;         // 纬度（十进制度格式）
-    char Lon_area;      // 经度区域 ('E'/'W')
-    char Lat_area;      // 纬度区域 ('N'/'S')
-    uint8_t Time_H;     // 小时
-    uint8_t Time_M;     // 分钟
-    uint8_t Time_S;     // 秒
-    uint8_t Status;     // 定位状态 (1:定位成功 0:定位失败)
+    // Original structure
+    double Lon;         // Longitude (decimal degree format)
+    double Lat;         // Latitude (decimal degree format)
+    char Lon_area;      // Longitude area ('E'/'W')
+    char Lat_area;      // Latitude area ('N'/'S')
+    uint8_t Time_H;     // Hour
+    uint8_t Time_M;     // Minute
+    uint8_t Time_S;     // Second
+    uint8_t Status;     // Positioning status (1:positioning successful 0:positioning failed)
     
-    // 增强字段
-    double Lon_Raw;     // 原始NMEA格式经度（dddmm.mmmm）
-    double Lat_Raw;     // 原始NMEA格式纬度（ddmm.mmmm）
-    double Speed;       // 速度（公里/小时）
-    double Course;      // 航向（度）
-    char Date[11];      // 日期（YYYY-MM-DD格式）
-    double Altitude;    // 海拔高度（米）
+    // Enhanced fields
+    double Lon_Raw;     // Original NMEA format longitude (dddmm.mmmm)
+    double Lat_Raw;     // Original NMEA format latitude (ddmm.mmmm)
+    double Speed;       // Speed (kilometers/hour)
+    double Course;      // Course (degrees)
+    char Date[11];      // Date (YYYY-MM-DD format)
+    double Altitude;    // Altitude (meters)
 } GNRMC;
 
-// 坐标结构体
+// Coordinates structure
 typedef struct {
-    double Lon;         // 经度
-    double Lat;         // 纬度
+    double Lon;         // Longitude
+    double Lat;         // Latitude
 } Coordinates;
 
 /**
- * @brief 设置是否输出详细调试日志
- * @param enable 是否启用
+ * @brief Set whether to output detailed debug logs
+ * @param enable Whether to enable
  */
 void vendor_gps_set_debug(bool enable);
 
 /**
- * @brief 初始化GPS模块的厂商版本
- * @param uart_id UART ID (0 表示 UART0)
- * @param baud_rate 波特率
- * @param tx_pin TX 引脚
- * @param rx_pin RX 引脚
- * @param force_pin FORCE 引脚 (设置为 -1 表示不使用)
- * @return 初始化是否成功
+ * @brief Initialize the vendor version of GPS module
+ * @param uart_id UART ID (0 means UART0)
+ * @param baud_rate Baud rate
+ * @param tx_pin TX pin
+ * @param rx_pin RX pin
+ * @param force_pin FORCE pin (set to -1 if not used)
+ * @return Whether initialization was successful
  */
 bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int force_pin);
 
 /**
- * @brief 向GPS模块发送命令
- * @param data 命令字符串，不需要添加校验和
+ * @brief Send command to GPS module
+ * @param data Command string, no need to add checksum
  */
 void vendor_gps_send_command(char *data);
 
 /**
- * @brief 让GPS模块退出备份模式
+ * @brief Make GPS module exit backup mode
  */
 void vendor_gps_exit_backup_mode(void);
 
 /**
- * @brief 获取GPS的GNRMC数据
- * @return GNRMC 数据结构
+ * @brief Get GPS GNRMC data
+ * @return GNRMC data structure
  */
 GNRMC vendor_gps_get_gnrmc(void);
 
 /**
- * @brief 获取百度地图格式的GPS坐标
- * @return 百度地图坐标
+ * @brief Get GPS coordinates in Baidu Map format
+ * @return Baidu Map coordinates
  */
 Coordinates vendor_gps_get_baidu_coordinates(void);
 
 /**
- * @brief 获取谷歌地图格式的GPS坐标
- * @return 谷歌地图坐标
+ * @brief Get GPS coordinates in Google Map format
+ * @return Google Map coordinates
  */
 Coordinates vendor_gps_get_google_coordinates(void);
 
