@@ -96,7 +96,7 @@ LC76G_Pico 是一个基于 Raspberry Pi Pico 微控制器和 L76X GPS 模块的�
 
 1. 克隆此仓库：
 ```bash
-git clone https://github.com/yourusername/LC76G_Pico.git
+git clone https://github.com/musicaJack/LC76G_Pico.git
 cd LC76G_Pico
 ```
 
@@ -230,5 +230,5 @@ int main() {
 For any questions or suggestions, please feel free to reach out:
 
 - Email: yinyue@beingdigital.cn
-- Technical Discussions: Visit the project's [Wiki](https://github.com/yourusername/LC76G_Pico/wiki) or start a discussion in the [forum](https://github.com/yourusername/LC76G_Pico/discussions)
+- Technical Discussions: Visit the project's [Wiki](https://github.com/musicaJack/LC76G_Pico/wiki) or start a discussion in the [forum](https://github.com/musicaJack/LC76G_Pico/discussions)
 - For any other inquiries, please contact via email 

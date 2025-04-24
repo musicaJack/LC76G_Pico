@@ -13,27 +13,27 @@ LC76G_Pico 是一个基于 Raspberry Pi Pico 微控制器和 L76X GPS 模块的�
 ## 文档导航
 
 ### 用户指南
-- [快速入门](quick-start.md)
-- [硬件连接](hardware-connection.md)
-- [固件上传](firmware-upload.md)
-- [基本使用](basic-usage.md)
+- [快速入门](quick-start)
+- [硬件连接](hardware-connection)
+- [固件上传](firmware-upload)
+- [基本使用](basic-usage)
 
 ### 技术文档
-- [系统架构](system-architecture.md)
-- [GPS 模块](gps-module.md)
-- [显示模块](display-module.md)
-- [坐标系统](coordinate-systems.md)
-- [API 参考](api-reference.md)
+- [系统架构](system-architecture)
+- [GPS 模块](gps-module)
+- [显示模块](display-module)
+- [坐标系统](coordinate-systems)
+- [API 参考](api-reference)
 
 ### 开发者资源
-- [开发环境设置](development-setup.md)
-- [构建指南](build-guide.md)
-- [贡献指南](contributing.md)
-- [故障排除](troubleshooting.md)
+- [开发环境设置](development-setup)
+- [构建指南](build-guide)
+- [贡献指南](contributing)
+- [故障排除](troubleshooting)
 
 ## 联系方式
 
 如有任何问题或建议，欢迎通过以下方式联系：
 
 - 电子邮箱：yinyue@beingdigital.cn
-- 技术问题讨论：请访问本项目的 [GitHub Wiki](https://github.com/yourusername/LC76G_Pico/wiki) 或在 [论坛](https://github.com/yourusername/LC76G_Pico/discussions) 中发起讨论 
+- 技术问题讨论：请访问本项目的 [GitHub Wiki](https://github.com/musicaJack/LC76G_Pico/wiki) 或在 [论坛](https://github.com/musicaJack/LC76G_Pico/discussions) 中发起讨论 

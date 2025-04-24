@@ -73,82 +73,118 @@
 
 ## 坐标转换算法
 
-LC76G_Pico 项目实现了以下坐标转换函数：
+LC76G_Pico 项目实现了以下坐标转换API：
 
-### WGS-84 到 GCJ-02 的转换
-
-```c
-Coordinates wgs84_to_gcj02(double lon, double lat);
-```
-
-**算法原理**：
-1. 判断坐标是否在中国大陆范围内（粗略判断）
-2. 如果不在，则直接返回原坐标
-3. 如果在，则应用偏移算法：
-   - 计算偏移量（涉及三角函数和特定参数）
-   - 将偏移量应用到原坐标
-
-### GCJ-02 到 BD-09 的转换
+### 获取谷歌地图坐标（WGS-84 到 GCJ-02）
 
 ```c
-Coordinates gcj02_to_bd09(double lon, double lat);
+Coordinates vendor_gps_get_google_coordinates(void);
 ```
 
-**算法原理**：
-1. 应用百度偏移公式计算偏移量
-2. 偏移公式相对简单，主要是坐标的线性变换和正弦函数偏移
+**功能说明**：
+获取当前 GPS 定位位置转换后的谷歌/高德地图坐标（GCJ-02格式）。
 
-### WGS-84 到 BD-09 的直接转换
+**使用方法**：
+- 无需提供参数，函数会自动获取当前GPS定位数据并进行转换
+- 如果GPS未定位成功，将返回经纬度均为0的坐标
+- 如果定位坐标不在中国大陆范围内，将返回原始WGS-84坐标
+
+### 获取百度地图坐标（WGS-84 到 BD-09）
 
 ```c
-Coordinates wgs84_to_bd09(double lon, double lat);
+Coordinates vendor_gps_get_baidu_coordinates(void);
 ```
 
-**算法原理**：
-1. 先将 WGS-84 转换为 GCJ-02
-2. 再将 GCJ-02 转换为 BD-09
+**功能说明**：
+获取当前 GPS 定位位置转换后的百度地图坐标（BD-09格式）。
+
+**使用方法**：
+- 无需提供参数，函数会自动获取当前GPS定位数据并进行转换
+- 如果GPS未定位成功，将返回经纬度均为0的坐标
+- 如果定位坐标不在中国大陆范围内，将返回原始WGS-84坐标
+- 转换过程中会先转为GCJ-02坐标，再转为BD-09坐标
+
+### 内部实现细节
+
+项目内部使用以下静态函数实现坐标转换算法，用户通常不需要直接调用这些函数：
+
+```c
+// WGS-84转GCJ-02
+static Coordinates wgs84_to_gcj02(double lon, double lat);
+
+// GCJ-02转BD-09
+static Coordinates gcj02_to_bd09(double lon, double lat);
+
+// WGS-84直接转BD-09
+static Coordinates wgs84_to_bd09(double lon, double lat);
+```
+
+**转换原理**：
+1. 判断坐标是否在中国大陆范围内（使用经纬度矩形区域判断）
+2. 如不在中国大陆范围内，直接返回原始坐标
+3. 如在中国大陆范围内，应用非线性偏移算法进行转换
+4. 转换涉及复杂的数学计算，包括椭球体参数和偏移系数
 
 ## 使用示例
 
 ### 基本转换示例
 
 ```c
-#include "coordinate_converter.h"
+#include "gps/vendor_gps_parser.h"
 
-// GPS 获取的原始 WGS-84 坐标
-double lon = 116.39742;
-double lat = 39.90895;
-
-// 转换为高德地图使用的坐标
-Coordinates gcj = wgs84_to_gcj02(lon, lat);
-printf("GCJ-02 坐标: %.6f, %.6f\n", gcj.Lon, gcj.Lat);
-
-// 转换为百度地图使用的坐标
-Coordinates bd = wgs84_to_bd09(lon, lat);
-printf("BD-09 坐标: %.6f, %.6f\n", bd.Lon, bd.Lat);
+int main() {
+    stdio_init_all();
+    
+    // 初始化 GPS 模块
+    vendor_gps_init(0, 9600, 0, 1, -1);
+    
+    // 等待定位成功
+    while (true) {
+        GNRMC gps_data = vendor_gps_get_gnrmc();
+        
+        if (gps_data.Status) {
+            // 获取原始WGS-84坐标
+            printf("原始坐标: %.6f, %.6f\n", gps_data.Lon, gps_data.Lat);
+            
+            // 获取谷歌地图坐标
+            Coordinates google_coords = vendor_gps_get_google_coordinates();
+            printf("谷歌地图坐标: %.6f, %.6f\n", google_coords.Lon, google_coords.Lat);
+            
+            // 获取百度地图坐标
+            Coordinates baidu_coords = vendor_gps_get_baidu_coordinates();
+            printf("百度地图坐标: %.6f, %.6f\n", baidu_coords.Lon, baidu_coords.Lat);
+            
+            break;
+        }
+        
+        sleep_ms(1000);
+    }
+    
+    return 0;
+}
 ```
 
 ### 与地图 URL 集成
 
 ```c
-#include "coordinate_converter.h"
+#include "gps/vendor_gps_parser.h"
 #include <stdio.h>
 
 // 生成高德地图链接
-void generate_amap_url(double wgs_lon, double wgs_lat) {
-    Coordinates gcj = wgs84_to_gcj02(wgs_lon, wgs_lat);
+void generate_amap_url(void) {
+    Coordinates google_coords = vendor_gps_get_google_coordinates();
     char url[256];
     sprintf(url, "https://uri.amap.com/marker?position=%.6f,%.6f", 
-            gcj.Lon, gcj.Lat);
+            google_coords.Lon, google_coords.Lat);
     printf("高德地图链接: %s\n", url);
 }
 
 // 生成百度地图链接
-void generate_baidu_url(double wgs_lon, double wgs_lat) {
-    Coordinates bd = wgs84_to_bd09(wgs_lon, wgs_lat);
+void generate_baidu_url(void) {
+    Coordinates baidu_coords = vendor_gps_get_baidu_coordinates();
     char url[256];
     sprintf(url, "https://api.map.baidu.com/marker?location=%.6f,%.6f&title=我的位置", 
-            bd.Lat, bd.Lon);  // 注意百度地图 API 中经纬度顺序是反的
+            baidu_coords.Lat, baidu_coords.Lon);  // 注意百度地图 API 中经纬度顺序是反的
     printf("百度地图链接: %s\n", url);
 }
 ```
@@ -169,13 +205,4 @@ A: 中国香港、澳门和台湾地区通常不需要进行坐标转换，可�
 
 ### Q: 如何判断一个坐标是否在中国大陆范围内？
 
-A: 项目中使用了简化的矩形判断方法：
-```c
-bool is_in_china(double lon, double lat) {
-    if (lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271)
-        return false;
-    return true;
-}
-```
-
-实际使用中，可以考虑更精确的中国边界判断算法，如多边形区域判断。 
+A: 项目中使用了简化的矩形判断方法来确定坐标是否在中国大陆范围内，这是坐标转换算法的一部分。如果坐标不在中国大陆范围内，则不进行偏移处理。 

@@ -24,7 +24,7 @@
 1. 从 GitHub 克隆项目仓库：
 
 ```bash
-git clone https://github.com/yourusername/LC76G_Pico.git
+git clone https://github.com/musicaJack/LC76G_Pico.git
 cd LC76G_Pico
 ```
 
@@ -195,4 +195,4 @@ make -j4
 如有任何问题，请通过以下方式获取帮助：
 
 - 发送邮件至：yinyue@beingdigital.cn
-- 在项目 [Wiki](https://github.com/yourusername/LC76G_Pico/wiki) 或 [论坛](https://github.com/yourusername/LC76G_Pico/discussions) 中提问 
+- 在项目 [Wiki](https://github.com/musicaJack/LC76G_Pico/wiki) 或 [论坛](https://github.com/musicaJack/LC76G_Pico/discussions) 中提问 

@@ -32,7 +32,7 @@
 
 ```bash
 # 克隆代码仓库
-git clone https://github.com/your-organization/LC76G_Pico.git
+git clone https://github.com/musicaJack/LC76G_Pico.git
 cd LC76G_Pico
 
 # 初始化并更新子模块

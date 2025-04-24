@@ -144,7 +144,7 @@
    打开终端或命令提示符，执行以下命令：
 
    ```bash
-   git clone https://github.com/your-organization/LC76G_Pico.git
+   git clone https://github.com/musicaJack/LC76G_Pico.git
    cd LC76G_Pico
    ```
 

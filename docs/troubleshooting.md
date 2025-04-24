@@ -488,4 +488,4 @@ arm-none-eabi-gdb build/your_project.elf
 
 ---
 
-如果您的问题未在此文档中解决，请在GitHub上提交issue或查阅[官方文档](https://github.com/your-organization/LC76G_Pico)获取更多信息。我们的社区也可能提供额外的支持和解决方案。 
+如果您的问题未在此文档中解决，请在GitHub上提交issue或查阅[官方文档](https://github.com/musicaJack/LC76G_Pico)获取更多信息。我们的社区也可能提供额外的支持和解决方案。 

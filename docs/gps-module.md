@@ -30,28 +30,24 @@ GPS 数据使用以下结构保存：
 
 ```c
 typedef struct {
-    // 基本位置信息
+    // 原始结构
     double Lon;         // 经度（十进制度格式）
     double Lat;         // 纬度（十进制度格式）
     char Lon_area;      // 经度区域 ('E'/'W')
     char Lat_area;      // 纬度区域 ('N'/'S')
-    
-    // 时间信息
     uint8_t Time_H;     // 小时
     uint8_t Time_M;     // 分钟
     uint8_t Time_S;     // 秒
-    char Date[11];      // 日期（YYYY-MM-DD格式）
-    
-    // 状态信息
     uint8_t Status;     // 定位状态 (1:定位成功 0:定位失败)
     
-    // 原始格式数据
+    // 增强字段
     double Lon_Raw;     // 原始NMEA格式经度（dddmm.mmmm）
     double Lat_Raw;     // 原始NMEA格式纬度（ddmm.mmmm）
-    
-    // 扩展信息
     double Speed;       // 速度（公里/小时）
     double Course;      // 航向（度）
+    char Date[11];      // 日期（YYYY-MM-DD格式）
+    
+    // 其他字段
     double Altitude;    // 海拔高度（米）
 } GNRMC;
 ```
@@ -155,22 +151,20 @@ int main() {
 ## 高级应用
 
 ### 坐标转换
+
+以下函数提供不同坐标系统间的转换功能：
+
 ```c
-// WGS-84 转 GCJ-02 (谷歌地图)
-Coordinates wgs84_to_gcj02(double lon, double lat);
+// 获取百度地图格式的GPS坐标
+Coordinates vendor_gps_get_baidu_coordinates(void);
 
-// GCJ-02 转 BD-09 (百度地图)
-Coordinates gcj02_to_bd09(double lon, double lat);
-
-// WGS-84 转 BD-09 (直接转换到百度地图)
-Coordinates wgs84_to_bd09(double lon, double lat);
+// 获取谷歌地图格式的GPS坐标
+Coordinates vendor_gps_get_google_coordinates(void);
 ```
 
-### 低功耗模式
-```c
-// 进入低功耗模式
-void vendor_gps_enter_backup_mode(void);
+### 电源管理
 
+```c
 // 退出低功耗模式
 void vendor_gps_exit_backup_mode(void);
 ```

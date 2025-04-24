@@ -307,10 +307,50 @@ void st7789_fill_circle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color);
 
 ## 坐标转换 API
 
+#### `vendor_gps_get_baidu_coordinates`
+
+```c
+Coordinates vendor_gps_get_baidu_coordinates(void);
+```
+
+**功能**：获取当前GPS位置的百度地图坐标（BD-09）
+
+**参数**：无
+
+**返回值**：百度地图坐标结构体
+
+**示例**：
+```c
+Coordinates baidu_coords = vendor_gps_get_baidu_coordinates();
+printf("百度地图坐标：经度=%.6f, 纬度=%.6f\n", baidu_coords.Lon, baidu_coords.Lat);
+```
+
+#### `vendor_gps_get_google_coordinates`
+
+```c
+Coordinates vendor_gps_get_google_coordinates(void);
+```
+
+**功能**：获取当前GPS位置的谷歌/高德地图坐标（GCJ-02）
+
+**参数**：无
+
+**返回值**：谷歌/高德地图坐标结构体
+
+**示例**：
+```c
+Coordinates google_coords = vendor_gps_get_google_coordinates();
+printf("谷歌/高德地图坐标：经度=%.6f, 纬度=%.6f\n", google_coords.Lon, google_coords.Lat);
+```
+
+### 内部坐标转换函数
+
+以下函数为内部实现，通常不需要直接调用：
+
 #### `wgs84_to_gcj02`
 
 ```c
-Coordinates wgs84_to_gcj02(double lon, double lat);
+static Coordinates wgs84_to_gcj02(double lon, double lat);
 ```
 
 **功能**：将 WGS-84 坐标转换为 GCJ-02 坐标（谷歌/高德地图）
@@ -324,7 +364,7 @@ Coordinates wgs84_to_gcj02(double lon, double lat);
 #### `gcj02_to_bd09`
 
 ```c
-Coordinates gcj02_to_bd09(double lon, double lat);
+static Coordinates gcj02_to_bd09(double lon, double lat);
 ```
 
 **功能**：将 GCJ-02 坐标转换为 BD-09 坐标（百度地图）
@@ -338,7 +378,7 @@ Coordinates gcj02_to_bd09(double lon, double lat);
 #### `wgs84_to_bd09`
 
 ```c
-Coordinates wgs84_to_bd09(double lon, double lat);
+static Coordinates wgs84_to_bd09(double lon, double lat);
 ```
 
 **功能**：将 WGS-84 坐标直接转换为 BD-09 坐标
