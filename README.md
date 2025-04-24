@@ -14,7 +14,7 @@ LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico
 
 ## Features
 
-- **Comprehensive GPS Data Processing**: Accurately extracts and processes geographic coordinates, altitude, speed, and course information from NMEA sentences.
+- **Comprehensive GPS Data Processing**: Accurately extracts and processes geographic coordinates, speed, and course information from NMEA sentences.
 - **Multiple Coordinate System Support**: Built-in conversion functions for WGS-84, GCJ-02 (Google Maps), and BD-09 (Baidu Maps) coordinate systems.
 - **Modular Architecture**: Clean separation between hardware drivers and application logic for enhanced extensibility.
 - **Low Power Operation**: Support for standby modes and power management features of the L76X GPS module.
@@ -29,6 +29,8 @@ LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico
 - Optional: ST7789 Display for visualization (240×320)
 - UART connection cables
 - Power supply (USB or battery)
+
+> **Important Note**: This project actually uses a custom-developed board as its base, which integrates the Raspberry Pi Pico, L76X GPS module, and ST7789 display. The wiring diagrams above are applicable for DIY setups. If you wish to replicate the complete project, you can reference these wiring diagrams for custom PCB design.
 
 ## Wiring Diagram
 
@@ -47,6 +49,31 @@ LC76G_Pico is an open-source GPS tracking project based on the Raspberry Pi Pico
 │                 │                  │                 │
 └─────────────────┘                  └─────────────────┘
 ```
+
+### ST7789 LCD Display Wiring
+
+```
+┌─────────────────┐                  ┌─────────────────┐
+│                 │                  │                 │
+│  Raspberry Pi   │                  │   ST7789 LCD    │
+│     Pico        │                  │    Display      │
+│                 │                  │                 │
+│  GPIO 19 (MOSI) │─────────────────→│  DIN            │
+│  GPIO 18 (SCK)  │─────────────────→│  SCK            │
+│  GPIO 17 (CS)   │─────────────────→│  CS             │
+│  GPIO 20 (DC)   │─────────────────→│  DC             │
+│  GPIO 15 (RST)  │─────────────────→│  RST            │
+│  GPIO 10 (BL)   │─────────────────→│  BL             │
+│  VCC            │─────────────────→│  VCC            │
+│  GND            │←────────────────→│  GND            │
+│                 │                  │                 │
+└─────────────────┘                  └─────────────────┘
+```
+
+Default ST7789 LCD display SPI configuration:
+- SPI Interface: SPI0
+- Clock Speed: 40MHz
+- Screen Resolution: 240×320 pixels
 
 ## Software Architecture
 
@@ -197,3 +224,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk)
 - [NMEA Standard](https://www.nmea.org/)
 - [WGS-84 to GCJ-02 Conversion](https://github.com/googollee/eviltransform)
+
+## Contact Information
+
+For any questions or suggestions, please feel free to reach out:
+
+- Email: yinyue@beingdigital.cn
+- Technical Discussions: Visit the project's [Wiki](https://github.com/yourusername/LC76G_Pico/wiki) or start a discussion in the [forum](https://github.com/yourusername/LC76G_Pico/discussions)
+- For any other inquiries, please contact via email
