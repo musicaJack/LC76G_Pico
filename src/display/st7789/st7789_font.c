@@ -5,8 +5,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "display/st7789_gfx.h"
-#include "display/st7789.h"
+#include "st7789_gfx.h"
+#include "st7789.h"
 
 // Standard ASCII 5x7 font (only contains basic ASCII characters 0x20-0x7E)
 static const unsigned char font5x7[] = {

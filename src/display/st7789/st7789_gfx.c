@@ -8,8 +8,8 @@
 #include <string.h>
 #include <math.h>
 #include "pico/stdlib.h"
-#include "display/st7789_gfx.h"
-#include "display/st7789.h"
+#include "st7789_gfx.h"
+#include "st7789.h"
 
 /**
  * @brief Draw horizontal line

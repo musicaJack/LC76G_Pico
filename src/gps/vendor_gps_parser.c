@@ -174,7 +174,7 @@ bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int
  * @brief Send command to GPS module
  * @param data Command string, no need to add checksum
  */
-void vendor_gps_send_command(char *data) {
+void vendor_gps_send_command(const char *data) {
     char Check = data[1], Check_char[3]={0};
     uint8_t i = 0;
     uart_putc(gps_uart, '\r');

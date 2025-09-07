@@ -9,8 +9,8 @@
 #include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
-#include "display/st7789.h"
-#include "display/st7789_gfx.h"
+#include "st7789.h"
+#include "st7789_gfx.h"
 #include "gps/vendor_gps_parser.h"
 
 // Screen parameter definitions

@@ -1,0 +1,28 @@
+{
+  "display": {
+    "driver": "ili9488",
+    "rotation": 0,
+    "brightness": 100
+  },
+  "hardware": {
+    "spi": {
+      "port": 0,
+      "frequency": 40000000
+    },
+    "pins": {
+      "dc": 20,
+      "rst": 15,
+      "cs": 17,
+      "sclk": 18,
+      "mosi": 19,
+      "bl": 16
+    }
+  },
+  "gps": {
+    "uart_id": 0,
+    "baud_rate": 115200,
+    "tx_pin": 0,
+    "rx_pin": 1,
+    "force_pin": 4
+  }
+}

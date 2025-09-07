@@ -8,7 +8,7 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
-#include "display/st7789_hal.h"
+#include "st7789_hal.h"
 
 // Static configuration
 static struct {

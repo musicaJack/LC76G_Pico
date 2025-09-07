@@ -60,7 +60,7 @@ bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int
  * @brief 向GPS模块发送命令
  * @param data 命令字符串，不需要添加校验和
  */
-void vendor_gps_send_command(char *data);
+void vendor_gps_send_command(const char *data);
 
 /**
  * @brief 让GPS模块退出备份模式

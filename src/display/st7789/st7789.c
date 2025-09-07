@@ -8,8 +8,8 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
-#include "display/st7789.h"
-#include "display/st7789_hal.h"
+#include "st7789.h"
+#include "st7789_hal.h"
 
 // Static configuration
 static struct {
