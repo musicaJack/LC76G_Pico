@@ -10,9 +10,9 @@
 #include <stdbool.h>
 #include "pico/stdlib.h"
 
-// Original vendor code data structure, enhanced version
+// LC76G Enhanced GPS data structure supporting multiple NMEA formats
 typedef struct {
-    // Original structure
+    // Basic positioning data
     double Lon;         // Longitude (decimal degree format)
     double Lat;         // Latitude (decimal degree format)
     char Lon_area;      // Longitude area ('E'/'W')
@@ -29,7 +29,23 @@ typedef struct {
     double Course;      // Course (degrees)
     char Date[11];      // Date (YYYY-MM-DD format)
     double Altitude;    // Altitude (meters)
+    
+    // LC76G specific fields
+    uint8_t Quality;    // GPS quality (0=invalid, 1=GPS SPS, 2=differential/SBAS)
+    uint8_t Satellites; // Number of satellites used
+    double HDOP;        // Horizontal dilution of precision
+    double PDOP;        // Position dilution of precision
+    double VDOP;        // Vertical dilution of precision
+    char Mode;          // Mode indicator (A=autonomous, D=differential, N=no fix)
+    char NavStatus;     // Navigation status (V=invalid, A=valid)
 } GNRMC;
+
+// LC76G PAIR command response structure
+typedef struct {
+    uint16_t CommandID; // Command ID (e.g., 050, 062, 864)
+    uint8_t Result;     // Result (0=success, non-zero=error)
+    bool Valid;         // Whether response is valid
+} PAIRResponse;
 
 // Coordinates structure
 typedef struct {
@@ -82,5 +98,78 @@ Coordinates vendor_gps_get_baidu_coordinates(void);
  * @return Google Map coordinates
  */
 Coordinates vendor_gps_get_google_coordinates(void);
+
+// LC76G Enhanced Functions
+
+/**
+ * @brief Send PAIR command to LC76G module
+ * @param command_id Command ID (e.g., 050, 062, 864)
+ * @param params Command parameters (comma-separated)
+ * @return PAIR response structure
+ */
+PAIRResponse vendor_gps_send_pair_command(uint16_t command_id, const char* params);
+
+/**
+ * @brief Set LC76G positioning rate
+ * @param rate_ms Rate in milliseconds (100-1000)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_positioning_rate(uint16_t rate_ms);
+
+/**
+ * @brief Set LC76G NMEA message output rate
+ * @param message_type Message type (0=GGA, 1=GLL, 2=GSA, 3=GSV, 4=RMC, 5=VTG)
+ * @param output_rate Output rate (0=disable, 1-20=every N fixes)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_nmea_output_rate(uint8_t message_type, uint8_t output_rate);
+
+/**
+ * @brief Set LC76G baud rate
+ * @param baud_rate Baud rate (9600, 115200, 230400, 460800, 921600, 3000000)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_baud_rate(uint32_t baud_rate);
+
+/**
+ * @brief Perform LC76G cold start
+ * @return Whether command was successful
+ */
+bool vendor_gps_cold_start(void);
+
+/**
+ * @brief Perform LC76G hot start
+ * @return Whether command was successful
+ */
+bool vendor_gps_hot_start(void);
+
+/**
+ * @brief Save LC76G configuration to flash
+ * @return Whether command was successful
+ */
+bool vendor_gps_save_config(void);
+
+/**
+ * @brief Set LC76G satellite systems
+ * @param gps Enable GPS (1=enabled, 0=disabled)
+ * @param glonass Enable GLONASS (1=enabled, 0=disabled)
+ * @param galileo Enable Galileo (1=enabled, 0=disabled)
+ * @param bds Enable BDS (1=enabled, 0=disabled)
+ * @param qzss Enable QZSS (1=enabled, 0=disabled)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_satellite_systems(uint8_t gps, uint8_t glonass, uint8_t galileo, uint8_t bds, uint8_t qzss);
+
+/**
+ * @brief Get LC76G satellite count from GSV messages
+ * @return Number of satellites in view
+ */
+uint8_t vendor_gps_get_satellite_count(void);
+
+/**
+ * @brief Get LC76G signal strength from GSV messages
+ * @return Average signal strength (0-100)
+ */
+uint8_t vendor_gps_get_signal_strength(void);
 
 #endif /* VENDOR_GPS_PARSER_H */ 

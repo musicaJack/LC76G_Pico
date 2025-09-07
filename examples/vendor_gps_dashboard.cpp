@@ -66,8 +66,7 @@ using namespace pico_ili9488_gfx;
 #define LEFT_DIAL_CENTER_X  120         // 左仪表中心X（1/4屏幕位置）
 #define RIGHT_DIAL_CENTER_X 360         // 右仪表中心X（3/4屏幕位置）
 #define DIAL_CENTER_Y       140         // 仪表中心Y（为底部状态栏留出空间）
-#define TIME_X              240         // 中间时间显示X（屏幕中心）
-#define TIME_Y              280         // 中间时间显示Y（仪表盘下方）
+// TIME_X 和 TIME_Y 已移除，数字时间显示已删除
 #define SPEED_X             240         // 速度显示X（屏幕中心）
 #define SPEED_Y             300         // 速度显示Y（时间下方）
 #define STATUS_BAR_HEIGHT   40
@@ -100,7 +99,7 @@ static bool button_processed = false;
 // 局部更新标志
 static bool need_update_compass = false;
 static bool need_update_speedometer = false;
-static bool need_update_time = false;
+// need_update_time 已移除，数字时间显示使用内部局部刷新
 static bool need_update_status = false;
 static bool need_update_gps_signal = false;
 
@@ -109,6 +108,8 @@ static uint8_t last_clock_hour = 0;
 static uint8_t last_clock_minute = 0;
 static uint8_t last_clock_second = 0;
 static bool clock_initialized = false;
+
+// 数字时间显示相关变量已移除
 
 // GPS信号模拟数据（实际应用中应该从GPS模块获取）
 static uint8_t gps_satellites_count = 0;
@@ -218,12 +219,20 @@ void draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t colo
 // 绘制加粗线条
 void draw_thick_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t color, uint8_t thickness = 3) {
     if (gfx) {
+        printf("[绘制调试] draw_thick_line: (%d,%d) -> (%d,%d), 颜色=0x%06X, 厚度=%d\n", 
+               x0, y0, x1, y1, color, thickness);
+        
         // 计算线条方向向量
         int16_t dx = x1 - x0;
         int16_t dy = y1 - y0;
         float length = sqrt(dx * dx + dy * dy);
         
-        if (length == 0) return; // 避免除零
+        if (length == 0) {
+            printf("[绘制调试] 线段长度为0，跳过绘制\n");
+            return; // 避免除零
+        }
+        
+        printf("[绘制调试] 线段长度: %.2f, dx=%d, dy=%d\n", length, dx, dy);
         
         // 归一化方向向量
         float nx = dx / length;
@@ -239,8 +248,16 @@ void draw_thick_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_
             int16_t offset_x = (int16_t)(offset * perp_x);
             int16_t offset_y = (int16_t)(offset * perp_y);
             
+            printf("[绘制调试] 绘制第%d条线: 偏移(%d,%d), 实际坐标(%d,%d) -> (%d,%d)\n", 
+                   i, offset_x, offset_y, 
+                   x0 + offset_x, y0 + offset_y, 
+                   x1 + offset_x, y1 + offset_y);
+            
             gfx->drawLine(x0 + offset_x, y0 + offset_y, x1 + offset_x, y1 + offset_y, color);
         }
+        printf("[绘制调试] draw_thick_line 完成\n");
+    } else {
+        printf("[绘制调试] 错误：gfx对象为空，无法绘制\n");
     }
 }
 
@@ -481,7 +498,7 @@ void update_gps_data() {
         // 设置局部更新标志
         if (course_changed) need_update_compass = true;
         if (speed_changed) need_update_speedometer = true;
-        if (time_changed) need_update_time = true;
+        // 数字时间显示现在使用内部局部刷新，不需要外部标志
         if (status_changed) need_update_status = true;
         
         // 时钟需要每秒更新（秒针移动）
@@ -604,12 +621,7 @@ void draw_analog_clock(uint16_t center_x, uint16_t center_y, uint8_t hour, uint8
         draw_thick_line(center_x, center_y, hour_x, hour_y, COLOR_WHITE, 4);
     }
     
-    // 更新数字时间显示（每分钟更新）
-    if (minute != last_clock_minute) {
-        char time_str[16];
-        snprintf(time_str, sizeof(time_str), "%02d:%02d", hour, minute);
-        draw_string(TIME_X - 30, TIME_Y, time_str, COLOR_WHITE, COLOR_BLACK);
-    }
+    // 数字时间显示已移除，界面更简洁
     
     // 保存当前时间用于下次比较
     last_clock_hour = hour;
@@ -767,72 +779,81 @@ void draw_speedometer_pointer(uint16_t center_x, uint16_t center_y, float speed)
     static float last_speed = -1.0f;
     static int16_t last_pointer_x = 0, last_pointer_y = 0;
     
+    printf("[时速计调试] 开始绘制指针: center_x=%d, center_y=%d, speed=%.2f\n", center_x, center_y, speed);
+    
     // 绘制速度指针
     // 如果速度小于1km/h，指针指向0
     float display_speed = (speed < 1.0f) ? 0.0f : speed;
+    // 修复角度计算：0速度对应-90度（顶部），120速度对应90度（底部）
     float speed_angle = (display_speed / 120.0f * 180.0f - 90.0f) * M_PI / 180.0f;
     speed_angle = fmaxf(-M_PI/2, fminf(M_PI/2, speed_angle)); // 限制在-90°到90°
     
-    int16_t pointer_x = center_x + (DIAL_RADIUS - 20) * cos(speed_angle);
-    int16_t pointer_y = center_y + (DIAL_RADIUS - 20) * sin(speed_angle);
+    // 调整指针长度，确保指向正确的刻度位置
+    int16_t pointer_length = DIAL_RADIUS - 15; // 从20改为15，让指针更接近刻度
+    int16_t pointer_x = center_x + pointer_length * cos(speed_angle);
+    int16_t pointer_y = center_y + pointer_length * sin(speed_angle);
+    
+    printf("[时速计调试] 计算参数: display_speed=%.2f, speed_angle=%.2f度, pointer_x=%d, pointer_y=%d\n", 
+           display_speed, speed_angle * 180.0f / M_PI, pointer_x, pointer_y);
+    printf("[时速计调试] 仪表参数: DIAL_RADIUS=%d, 指针长度=%d\n", DIAL_RADIUS, pointer_length);
     
     // 智能局部刷新：只在指针位置变化时更新
     if (fabs(speed - last_speed) > 0.1f || last_speed < 0) {
+        printf("[时速计调试] 指针需要更新: last_speed=%.2f, 差值=%.2f\n", last_speed, fabs(speed - last_speed));
+        
         // 清除旧指针（如果存在）
         if (last_speed >= 0) {
-            draw_thick_line(center_x, center_y, last_pointer_x, last_pointer_y, COLOR_BLACK, 8);
-            draw_filled_circle(last_pointer_x, last_pointer_y, 6, COLOR_BLACK);
+            printf("[时速计调试] 清除旧指针: (%d,%d) -> (%d,%d)\n", center_x, center_y, last_pointer_x, last_pointer_y);
+            draw_thick_line(center_x, center_y, last_pointer_x, last_pointer_y, COLOR_BLACK, 12);
+            draw_filled_circle(last_pointer_x, last_pointer_y, 8, COLOR_BLACK);
+            draw_filled_circle(center_x, center_y, 8, COLOR_BLACK);
             
             // 重绘被旧指针遮挡的数字
             redraw_speedometer_numbers_affected_by_pointer(center_x, center_y, 
                                                           last_pointer_x, last_pointer_y, 
-                                                          last_pointer_x, last_pointer_y, 8);
+                                                          last_pointer_x, last_pointer_y, 12);
         }
         
-        // 绘制新指针 - 确保红色指针可见
-        draw_thick_line(center_x, center_y, pointer_x, pointer_y, COLOR_RED, 8);
-        draw_filled_circle(pointer_x, pointer_y, 6, COLOR_RED);
+        // 绘制新指针 - 使用白色指针确保可见
+        printf("[时速计调试] 绘制新白色指针: (%d,%d) -> (%d,%d), 颜色=0x%06X\n", 
+               center_x, center_y, pointer_x, pointer_y, COLOR_WHITE);
+        
+        // 先绘制一个更粗的指针确保可见
+        draw_thick_line(center_x, center_y, pointer_x, pointer_y, COLOR_WHITE, 12);
+        draw_filled_circle(pointer_x, pointer_y, 8, COLOR_WHITE);
+        
+        // 再绘制中心点确保指针根部可见
+        draw_filled_circle(center_x, center_y, 8, COLOR_WHITE);
         
         // 重绘被新指针遮挡的数字
         redraw_speedometer_numbers_affected_by_pointer(center_x, center_y, 
                                                       last_pointer_x, last_pointer_y, 
-                                                      pointer_x, pointer_y, 8);
+                                                      pointer_x, pointer_y, 12);
         
         last_speed = speed;
         last_pointer_x = pointer_x;
         last_pointer_y = pointer_y;
+        
+        printf("[时速计调试] 指针绘制完成，保存新位置: (%d,%d)\n", pointer_x, pointer_y);
+    } else {
+        printf("[时速计调试] 指针位置未变化，跳过绘制\n");
     }
     
     // 显示当前速度（在底部中央）
     char speed_str[16];
     snprintf(speed_str, sizeof(speed_str), "%.1f km/h", speed);
     draw_string(SPEED_X - 30, SPEED_Y, speed_str, COLOR_GREEN, COLOR_BLACK);
+    printf("[时速计调试] 速度文字显示: '%s' 位置(%d,%d)\n", speed_str, SPEED_X - 30, SPEED_Y);
 }
 
-/**
- * @brief 绘制时间显示
- */
-void draw_time_display(uint16_t x, uint16_t y, uint8_t hour, uint8_t minute) {
-    char time_str[16];
-    snprintf(time_str, sizeof(time_str), "%02d:%02d", hour, minute);
-    
-    // 背景
-    draw_filled_rect(x - 30, y - 15, 60, 30, COLOR_DARK_BLUE);
-    // 加粗边框
-    draw_rect(x - 30, y - 15, 60, 30, COLOR_CYAN);
-    draw_rect(x - 29, y - 14, 58, 28, COLOR_CYAN);
-    
-    // 时间文字
-    draw_string(x - 20, y - 5, time_str, COLOR_WHITE, COLOR_DARK_BLUE);
-}
+// draw_time_display 函数已移除，界面更简洁
 
 /**
  * @brief 绘制状态栏
  */
 void draw_status_bar() {
-    // 只绘制状态栏背景，暂时不显示任何信息
-    draw_filled_rect(0, SCREEN_HEIGHT - STATUS_BAR_HEIGHT, SCREEN_WIDTH, STATUS_BAR_HEIGHT, COLOR_DARK_BLUE);
-    draw_thick_line(0, SCREEN_HEIGHT - STATUS_BAR_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - STATUS_BAR_HEIGHT, COLOR_CYAN, 3);
+    // 完全移除状态栏绘制，避免遮挡数字时钟
+    // 状态栏背景已移除
 }
 
 
@@ -844,11 +865,19 @@ void draw_dashboard_screen() {
     
     // 首次绘制时绘制所有静态元素
     if (!dashboard_initialized) {
+        printf("[仪表盘调试] 首次初始化仪表盘\n");
+        printf("[仪表盘调试] 右仪表盘位置: center_x=%d, center_y=%d\n", RIGHT_DIAL_CENTER_X, DIAL_CENTER_Y);
+        
         // 绘制时速计静态部分（刻度、外圈等）
+        printf("[仪表盘调试] 绘制时速计静态部分\n");
         draw_speedometer_static(RIGHT_DIAL_CENTER_X, DIAL_CENTER_Y);
-        // 强制绘制指针，确保速度为0时也显示红色指针指向0
+        
+        // 强制绘制指针，确保速度为0时也显示白色指针指向0
+        printf("[仪表盘调试] 强制绘制初始指针（速度为0）\n");
         draw_speedometer_pointer(RIGHT_DIAL_CENTER_X, DIAL_CENTER_Y, 0.0f);
+        
         dashboard_initialized = true;
+        printf("[仪表盘调试] 仪表盘初始化完成\n");
     }
     
     // 只在需要时进行局部更新
@@ -861,15 +890,12 @@ void draw_dashboard_screen() {
     
     if (need_update_speedometer) {
         float speed = current_gps_data.Speed;
+        printf("[仪表盘调试] 时速计需要更新，当前速度: %.2f km/h\n", speed);
         draw_speedometer_pointer(RIGHT_DIAL_CENTER_X, DIAL_CENTER_Y, speed);
         need_update_speedometer = false;
     }
     
-    if (need_update_time) {
-        // 绘制底部数字时间显示
-        draw_time_display(TIME_X, TIME_Y, current_gps_data.Time_H, current_gps_data.Time_M);
-        need_update_time = false;
-    }
+    // 数字时间显示已移除，界面更简洁
     
     if (need_update_status) {
         draw_status_bar();
@@ -877,9 +903,11 @@ void draw_dashboard_screen() {
     }
     
     if (need_update_gps_signal) {
-        // 绘制GPS信号信息（顶部区域）
-        draw_gps_satellite_count(10, 5, gps_satellites_count);
-        draw_gps_signal_strength(SCREEN_WIDTH - 40, 5, gps_signal_strength);
+        // 绘制GPS信号信息（顶部区域）- 使用LC76G增强功能
+        uint8_t satellite_count = vendor_gps_get_satellite_count();
+        uint8_t signal_strength = vendor_gps_get_signal_strength();
+        draw_gps_satellite_count(10, 5, satellite_count);
+        draw_gps_signal_strength(SCREEN_WIDTH - 40, 5, signal_strength);
         need_update_gps_signal = false;
     }
 }
@@ -919,6 +947,35 @@ extern "C" int vendor_gps_dashboard_demo() {
     }
     
     printf("GPS初始化成功\n");
+    
+    // LC76G增强配置
+    printf("配置LC76G模块...\n");
+    
+    // 设置定位速率为500ms（2Hz）
+    if (vendor_gps_set_positioning_rate(500)) {
+        printf("定位速率设置成功: 500ms\n");
+    } else {
+        printf("定位速率设置失败\n");
+    }
+    
+    // 启用多卫星系统（GPS + GLONASS + Galileo + BDS）
+    if (vendor_gps_set_satellite_systems(1, 1, 1, 1, 0)) {
+        printf("卫星系统配置成功: GPS+GLONASS+Galileo+BDS\n");
+    } else {
+        printf("卫星系统配置失败\n");
+    }
+    
+    // 设置NMEA消息输出速率
+    vendor_gps_set_nmea_output_rate(0, 1); // GGA每1次定位输出
+    vendor_gps_set_nmea_output_rate(3, 1); // GSV每1次定位输出
+    vendor_gps_set_nmea_output_rate(4, 1); // RMC每1次定位输出
+    
+    // 保存配置到Flash
+    if (vendor_gps_save_config()) {
+        printf("LC76G配置已保存到Flash\n");
+    } else {
+        printf("LC76G配置保存失败\n");
+    }
     printf("[GPS调试] GPS模块已就绪，等待数据...\n");
     
     // 发送设置命令
@@ -975,7 +1032,7 @@ extern "C" int vendor_gps_dashboard_demo() {
     // 初始化局部更新标志 - 首次绘制时全部更新
     need_update_compass = true;
     need_update_speedometer = true;
-    need_update_time = true;
+    // 数字时间显示现在使用内部局部刷新，不需要外部标志
     need_update_status = true;
     
     printf("系统初始化完成，开始运行...\n");

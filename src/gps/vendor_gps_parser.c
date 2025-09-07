@@ -44,6 +44,13 @@ static bool debug_output = false;
 static double last_valid_speed = 0.0;
 static double last_valid_course = 0.0;
 
+// LC76G satellite data
+static uint8_t gps_satellites_count = 0;
+static uint8_t gps_signal_strength = 0;
+
+// Forward declarations
+static void parse_gsv_message(const char* gsv_data);
+
 /******************************************************************************
 function:	
 	Latitude conversion
@@ -339,6 +346,38 @@ GNRMC vendor_gps_get_gnrmc() {
         char preview[101] = {0};
         strncpy(preview, buff_t, 100);
         printf("First 100 characters of GPS data: %s\n", preview);
+    }
+    
+    // Parse GSV messages for satellite information
+    char* gsv_start = strstr(buff_t, "$GPGSV");
+    if (!gsv_start) {
+        gsv_start = strstr(buff_t, "$GLGSV");
+    }
+    if (!gsv_start) {
+        gsv_start = strstr(buff_t, "$GAGSV");
+    }
+    if (!gsv_start) {
+        gsv_start = strstr(buff_t, "$GBGSV");
+    }
+    if (!gsv_start) {
+        gsv_start = strstr(buff_t, "$GQGSV");
+    }
+    
+    if (gsv_start) {
+        // Extract complete GSV sentence
+        char gsv_line[256] = {0};
+        int i = 0;
+        while (gsv_start[i] && gsv_start[i] != '\r' && gsv_start[i] != '\n' && i < 255) {
+            gsv_line[i] = gsv_start[i];
+            i++;
+        }
+        gsv_line[i] = '\0';
+        
+        if (debug_output) {
+            printf("Parsing GSV sentence: %s\n", gsv_line);
+        }
+        
+        parse_gsv_message(gsv_line);
     }
     
     // Find GNRMC or GPRMC sentence
@@ -640,4 +679,300 @@ Coordinates vendor_gps_get_google_coordinates() {
     // Map coordinate system conversion
     temp = transform(temp);
     return temp;
+}
+
+// =============================================================================
+// LC76G Enhanced Functions
+// =============================================================================
+
+/**
+ * @brief Calculate NMEA checksum
+ * @param data String data (without $ and *checksum)
+ * @return Calculated checksum
+ */
+static uint8_t calculate_nmea_checksum(const char* data) {
+    uint8_t checksum = 0;
+    for (int i = 0; data[i] != '\0'; i++) {
+        checksum ^= data[i];
+    }
+    return checksum;
+}
+
+/**
+ * @brief Send PAIR command to LC76G module
+ * @param command_id Command ID (e.g., 050, 062, 864)
+ * @param params Command parameters (comma-separated)
+ * @return PAIR response structure
+ */
+PAIRResponse vendor_gps_send_pair_command(uint16_t command_id, const char* params) {
+    PAIRResponse response = {0};
+    char command[128];
+    char response_buffer[256];
+    uint8_t checksum;
+    
+    // Build PAIR command
+    if (params && strlen(params) > 0) {
+        snprintf(command, sizeof(command), "$PAIR%03d,%s", command_id, params);
+    } else {
+        snprintf(command, sizeof(command), "$PAIR%03d", command_id);
+    }
+    
+    // Calculate checksum
+    checksum = calculate_nmea_checksum(command + 1); // Skip '$'
+    snprintf(command + strlen(command), sizeof(command) - strlen(command), "*%02X\r\n", checksum);
+    
+    if (debug_output) {
+        printf("Sending PAIR command: %s", command);
+    }
+    
+    // Send command
+    uart_puts(gps_uart, command);
+    
+    // Wait for response (with timeout)
+    absolute_time_t timeout = make_timeout_time_ms(1000);
+    uint16_t response_len = 0;
+    
+    while (!time_reached(timeout) && response_len < sizeof(response_buffer) - 1) {
+        if (uart_is_readable(gps_uart)) {
+            char c = uart_getc(gps_uart);
+            response_buffer[response_len++] = c;
+            
+            // Check if we have a complete response
+            if (c == '\n' && response_len > 10) {
+                response_buffer[response_len] = '\0';
+                break;
+            }
+        }
+        sleep_us(1000);
+    }
+    
+    if (response_len > 0) {
+        response_buffer[response_len] = '\0';
+        
+        // Parse PAIR response: $PAIR001,<CommandID>,<Result>*<Checksum>
+        char* pair_start = strstr(response_buffer, "$PAIR001");
+        if (pair_start) {
+            char* token = strtok(pair_start, ",");
+            int field = 0;
+            
+            while (token != NULL && field < 3) {
+                switch (field) {
+                    case 1: // Command ID
+                        response.CommandID = atoi(token);
+                        break;
+                    case 2: // Result
+                        response.Result = atoi(token);
+                        break;
+                }
+                token = strtok(NULL, ",");
+                field++;
+            }
+            
+            response.Valid = true;
+            
+            if (debug_output) {
+                printf("PAIR response: CommandID=%d, Result=%d\n", 
+                       response.CommandID, response.Result);
+            }
+        }
+    }
+    
+    return response;
+}
+
+/**
+ * @brief Set LC76G positioning rate
+ * @param rate_ms Rate in milliseconds (100-1000)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_positioning_rate(uint16_t rate_ms) {
+    if (rate_ms < 100 || rate_ms > 1000) {
+        return false;
+    }
+    
+    char params[16];
+    snprintf(params, sizeof(params), "%d", rate_ms);
+    
+    PAIRResponse response = vendor_gps_send_pair_command(050, params);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Set LC76G NMEA message output rate
+ * @param message_type Message type (0=GGA, 1=GLL, 2=GSA, 3=GSV, 4=RMC, 5=VTG)
+ * @param output_rate Output rate (0=disable, 1-20=every N fixes)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_nmea_output_rate(uint8_t message_type, uint8_t output_rate) {
+    if (message_type > 5 || output_rate > 20) {
+        return false;
+    }
+    
+    char params[16];
+    snprintf(params, sizeof(params), "%d,%d", message_type, output_rate);
+    
+    PAIRResponse response = vendor_gps_send_pair_command(062, params);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Set LC76G baud rate
+ * @param baud_rate Baud rate (9600, 115200, 230400, 460800, 921600, 3000000)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_baud_rate(uint32_t baud_rate) {
+    uint32_t valid_rates[] = {9600, 115200, 230400, 460800, 921600, 3000000};
+    bool valid = false;
+    
+    for (int i = 0; i < 6; i++) {
+        if (baud_rate == valid_rates[i]) {
+            valid = true;
+            break;
+        }
+    }
+    
+    if (!valid) {
+        return false;
+    }
+    
+    char params[32];
+    snprintf(params, sizeof(params), "0,0,%d", baud_rate);
+    
+    PAIRResponse response = vendor_gps_send_pair_command(864, params);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Perform LC76G cold start
+ * @return Whether command was successful
+ */
+bool vendor_gps_cold_start(void) {
+    PAIRResponse response = vendor_gps_send_pair_command(007, NULL);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Perform LC76G hot start
+ * @return Whether command was successful
+ */
+bool vendor_gps_hot_start(void) {
+    PAIRResponse response = vendor_gps_send_pair_command(004, NULL);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Save LC76G configuration to flash
+ * @return Whether command was successful
+ */
+bool vendor_gps_save_config(void) {
+    PAIRResponse response = vendor_gps_send_pair_command(513, NULL);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Set LC76G satellite systems
+ * @param gps Enable GPS (1=enabled, 0=disabled)
+ * @param glonass Enable GLONASS (1=enabled, 0=disabled)
+ * @param galileo Enable Galileo (1=enabled, 0=disabled)
+ * @param bds Enable BDS (1=enabled, 0=disabled)
+ * @param qzss Enable QZSS (1=enabled, 0=disabled)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_satellite_systems(uint8_t gps, uint8_t glonass, uint8_t galileo, uint8_t bds, uint8_t qzss) {
+    char params[32];
+    snprintf(params, sizeof(params), "%d,%d,%d,%d,%d,0", gps, glonass, galileo, bds, qzss);
+    
+    PAIRResponse response = vendor_gps_send_pair_command(066, params);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Parse GSV message to extract satellite information
+ * @param gsv_data GSV message data
+ */
+static void parse_gsv_message(const char* gsv_data) {
+    char* token;
+    char* gsv_copy = strdup(gsv_data);
+    int field = 0;
+    uint8_t total_satellites = 0;
+    uint8_t satellites_in_message = 0;
+    uint8_t total_snr = 0;
+    uint8_t snr_count = 0;
+    
+    token = strtok(gsv_copy, ",");
+    
+    while (token != NULL) {
+        switch (field) {
+            case 3: // Total number of satellites
+                total_satellites = atoi(token);
+                break;
+            case 7: // First satellite SNR
+                if (strlen(token) > 0) {
+                    uint8_t snr = atoi(token);
+                    if (snr > 0) {
+                        total_snr += snr;
+                        snr_count++;
+                    }
+                }
+                break;
+            case 11: // Second satellite SNR
+                if (strlen(token) > 0) {
+                    uint8_t snr = atoi(token);
+                    if (snr > 0) {
+                        total_snr += snr;
+                        snr_count++;
+                    }
+                }
+                break;
+            case 15: // Third satellite SNR
+                if (strlen(token) > 0) {
+                    uint8_t snr = atoi(token);
+                    if (snr > 0) {
+                        total_snr += snr;
+                        snr_count++;
+                    }
+                }
+                break;
+            case 19: // Fourth satellite SNR
+                if (strlen(token) > 0) {
+                    uint8_t snr = atoi(token);
+                    if (snr > 0) {
+                        total_snr += snr;
+                        snr_count++;
+                    }
+                }
+                break;
+        }
+        
+        token = strtok(NULL, ",");
+        field++;
+    }
+    
+    // Update global satellite data
+    gps_satellites_count = total_satellites;
+    
+    if (snr_count > 0) {
+        uint8_t avg_snr = total_snr / snr_count;
+        // Convert SNR (0-99 dB-Hz) to signal strength (0-100)
+        gps_signal_strength = (avg_snr * 100) / 99;
+        if (gps_signal_strength > 100) gps_signal_strength = 100;
+    }
+    
+    free(gsv_copy);
+}
+
+/**
+ * @brief Get LC76G satellite count from GSV messages
+ * @return Number of satellites in view
+ */
+uint8_t vendor_gps_get_satellite_count(void) {
+    return gps_satellites_count;
+}
+
+/**
+ * @brief Get LC76G signal strength from GSV messages
+ * @return Average signal strength (0-100)
+ */
+uint8_t vendor_gps_get_signal_strength(void) {
+    return gps_signal_strength;
 } 
