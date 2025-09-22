@@ -29,15 +29,21 @@ typedef struct i2c_inst i2c_inst_t;
 #define ILI9488_PIN_BL          16          // 背光控制引脚
 
 // =============================================================================
-// GPS模块 UART 配置
+// GPS模块 I2C 配置
 // =============================================================================
 
-// UART 接口配置
-#define GPS_UART_ID             0           // UART接口ID (UART0)
-#define GPS_BAUD_RATE           115200      // GPS模块波特率
-#define GPS_TX_PIN              0           // UART TX引脚
-#define GPS_RX_PIN              1           // UART RX引脚
+// I2C 接口配置
+#define GPS_I2C_INST            i2c1        // I2C接口实例 (I2C1)
+#define GPS_I2C_ADDR            0x42        // GPS模块I2C地址 (LC76G默认地址)
+#define GPS_I2C_SPEED           100000      // I2C速度（100kHz）
+#define GPS_PIN_SDA             6           // I2C数据引脚
+#define GPS_PIN_SCL             7           // I2C时钟引脚
 #define GPS_FORCE_PIN           4           // FORCE引脚（GPS模块控制）
+
+// I2C 地址定义 (基于LC76G模块规范)
+#define I2C_ADDRESS_CR_OR_CW    0x50        // 控制器地址 (控制/读写)
+#define I2C_ADDRESS_R           0x54        // 读取地址
+#define I2C_ADDRESS_W           0x58        // 写入地址 (一般不用)
 
 // GPS 操作参数
 #define GPS_UPDATE_INTERVAL_MS  1000        // GPS数据更新间隔（毫秒）
@@ -93,6 +99,11 @@ typedef struct i2c_inst i2c_inst_t;
 #define JOYSTICK_I2C_SDA_PIN    JOYSTICK_PIN_SDA
 #define JOYSTICK_I2C_SCL_PIN    JOYSTICK_PIN_SCL
 
+// GPS 兼容性定义（保持向后兼容）
+#define GPS_I2C_PORT            GPS_I2C_INST
+#define GPS_I2C_SDA_PIN         GPS_PIN_SDA
+#define GPS_I2C_SCL_PIN         GPS_PIN_SCL
+
 // =============================================================================
 // 硬件配置验证宏
 // =============================================================================
@@ -115,3 +126,6 @@ typedef struct i2c_inst i2c_inst_t;
 
 // 获取完整的Joystick配置
 #define JOYSTICK_GET_I2C_CONFIG() JOYSTICK_I2C_INST, JOYSTICK_I2C_ADDR, JOYSTICK_PIN_SDA, JOYSTICK_PIN_SCL, JOYSTICK_I2C_SPEED
+
+// 获取完整的GPS I2C配置
+#define GPS_GET_I2C_CONFIG() GPS_I2C_INST, GPS_I2C_ADDR, GPS_PIN_SDA, GPS_PIN_SCL, GPS_I2C_SPEED

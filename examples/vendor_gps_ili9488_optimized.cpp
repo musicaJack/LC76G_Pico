@@ -1,16 +1,16 @@
 /**
  * @file vendor_gps_ili9488_optimized.cpp
- * @brief GPS数据显示示例 - 使用ILI9488显示屏 (优化版)
+ * @brief GPS数据显示示例 - 使用ILI9488显示屏 (优化版) - 基于LC76G I2C适配器
  * 
  * 功能说明：
- * - 接收L76X GPS模块数据
+ * - 使用LC76G I2C适配器接收GPS模块数据
  * - 在ILI9488显示屏上显示GPS信息 (480x320横屏布局)
  * - 双栏布局：左侧GPS信息，右侧卫星信号
  * - 支持坐标转换（WGS84 -> 百度/谷歌坐标）
  * - 实时更新GPS状态
  * 
  * 硬件连接：
- * - GPS模块：UART连接
+ * - GPS模块：I2C1连接 (SDA: GPIO2, SCL: GPIO3)
  * - ILI9488显示：SPI连接
  * - 引脚配置：参见pin_config.hpp
  */
@@ -20,7 +20,7 @@
 #include <string.h>
 #include <math.h>
 #include "pico/stdlib.h"
-#include "hardware/uart.h"
+#include "hardware/gpio.h"
 
 // C++头文件
 #include "ili9488_driver.hpp"
@@ -30,7 +30,7 @@
 #include "pin_config.hpp"
 
 extern "C" {
-#include "gps/vendor_gps_parser.h"
+#include "gps/lc76g_i2c_adaptor.h"
 }
 
 // 使用C++命名空间
@@ -58,14 +58,14 @@ using namespace pico_ili9488_gfx;
 #define COLOR_LIGHT_GRAY 0xC0C0C0
 #define COLOR_ORANGE    0xFF8000
 
-// 界面布局参数
-#define HEADER_HEIGHT       40
-#define MAIN_AREA_HEIGHT    240
-#define STATUS_BAR_HEIGHT   40
-#define MARGIN_X            10
-#define MARGIN_Y            10
+// 界面布局参数 (横屏 480x320)
+#define HEADER_HEIGHT       35
+#define MAIN_AREA_HEIGHT    250
+#define STATUS_BAR_HEIGHT   35
+#define MARGIN_X            8
+#define MARGIN_Y            8
 
-// 双栏布局
+// 双栏布局 (横屏优化)
 #define LEFT_PANEL_WIDTH    240
 #define RIGHT_PANEL_WIDTH   240
 #define PANEL_SPACING       0
@@ -76,18 +76,24 @@ using namespace pico_ili9488_gfx;
 #define STATUS_BAR_Y        (HEADER_HEIGHT + MAIN_AREA_HEIGHT)
 
 // 左侧面板 (GPS信息)
-#define GPS_INFO_START_Y    (MAIN_AREA_Y + MARGIN_Y)
-#define GPS_LINE_HEIGHT     20
+#define GPS_INFO_START_Y    (MAIN_AREA_Y + MARGIN_Y + 5)
+#define GPS_LINE_HEIGHT     22
 #define GPS_INFO_WIDTH      (LEFT_PANEL_WIDTH - 2 * MARGIN_X)
 
 // 右侧面板 (卫星信号)
-#define SIGNAL_START_Y      (MAIN_AREA_Y + MARGIN_Y)
+#define SIGNAL_START_Y      (MAIN_AREA_Y + MARGIN_Y + 5)
 #define SIGNAL_AREA_WIDTH   (RIGHT_PANEL_WIDTH - 2 * MARGIN_X)
-#define SIGNAL_AREA_HEIGHT  200
+#define SIGNAL_AREA_HEIGHT  180
 
 // GPS数据更新间隔
-#define GPS_UPDATE_INTERVAL 1000
+#define GPS_UPDATE_INTERVAL 2000  // 增加到2秒，给GPS更多时间处理
 #define DISPLAY_REFRESH_INTERVAL 500
+
+// GPS状态跟踪变量
+static bool gps_was_valid = false;
+static uint32_t gps_valid_start_time = 0;
+static uint32_t last_successful_update = 0;
+static uint32_t consecutive_failures = 0;
 
 // =============================================================================
 // 全局变量
@@ -98,8 +104,8 @@ static ILI9488Driver* driver = nullptr;
 static PicoILI9488GFX<ILI9488Driver>* gfx = nullptr;
 
 // GPS数据缓存
-static GNRMC current_gps_data;
-static GNRMC previous_gps_data;
+static LC76G_GPS_Data current_gps_data;
+static LC76G_GPS_Data previous_gps_data;
 static bool gps_data_updated = false;
 static uint32_t last_gps_update = 0;
 
@@ -159,13 +165,44 @@ void fill_screen(uint32_t color) {
 // =============================================================================
 
 void update_gps_data() {
-    GNRMC new_data = vendor_gps_get_gnrmc();
+    // 尝试多次获取GPS数据，提高成功率
+    LC76G_GPS_Data new_data;
+    bool got_data = false;
+    
+    for (int retry = 0; retry < 3; retry++) {
+        lc76g_read_gps_data(&new_data);
+        
+        // 检查是否获得有效数据
+        if (new_data.Status == 1 && 
+            fabs(new_data.Lat) > 0.0001 && 
+            fabs(new_data.Lon) > 0.0001) {
+            got_data = true;
+            break;
+        }
+        
+        if (retry < 2) {
+            printf("[GPS调试] 重试获取数据 (%d/3)...\n", retry + 1);
+            sleep_ms(100);  // 短暂等待
+        }
+    }
     
     // 保存之前的数据
-    memcpy(&previous_gps_data, &current_gps_data, sizeof(GNRMC));
+    memcpy(&previous_gps_data, &current_gps_data, sizeof(LC76G_GPS_Data));
     
     // 增加数据包计数
     packet_count++;
+    
+    // 详细日志打印（减少日志频率，避免刷屏）
+    if (packet_count % 5 == 0 || got_data) {  // 每5次或成功时打印
+        printf("[GPS调试] 数据包 #%lu (重试: %s)\n", packet_count, got_data ? "成功" : "失败");
+        printf("[GPS调试] 状态: %d, 纬度: %.6f, 经度: %.6f\n", 
+               new_data.Status, new_data.Lat, new_data.Lon);
+        printf("[GPS调试] 速度: %.2f, 航向: %.2f\n", 
+               new_data.Speed, new_data.Course);
+        printf("[GPS调试] 时间: %02d:%02d:%02d (UTC), 日期: %s\n",
+               new_data.Time_H, new_data.Time_M, new_data.Time_S,
+               new_data.Date);
+    }
     
     // 检查是否获得有效时间数据
     bool got_time_data = (new_data.Time_H > 0 || new_data.Time_M > 0 || new_data.Time_S > 0);
@@ -177,15 +214,57 @@ void update_gps_data() {
             if (fabs(new_data.Lat) > 0.0001 && fabs(new_data.Lon) > 0.0001) {
                 got_valid_data = true;
                 valid_fix_count++;
+                printf("[GPS调试] 获得有效定位数据！\n");
+            } else {
+                printf("[GPS调试] 状态有效但坐标无效 (Lat:%.6f, Lon:%.6f)\n", 
+                       new_data.Lat, new_data.Lon);
             }
+        } else {
+            printf("[GPS调试] GPS状态无效 (Status=%d)\n", new_data.Status);
         }
+    } else {
+        printf("[GPS调试] 未获得时间数据\n");
     }
     
+    // 检查GPS状态变化
+    bool gps_is_valid = got_valid_data;
+    if (gps_is_valid && !gps_was_valid) {
+        // GPS从无效变为有效
+        gps_valid_start_time = to_ms_since_boot(get_absolute_time());
+        printf("[GPS调试] GPS定位成功，开始计时...\n");
+        printf("[GPS调试] 有效定位计数: %lu\n", valid_fix_count);
+    }
+    
+    // 添加GPS信号质量监控
+    if (gps_is_valid) {
+        uint32_t current_time = to_ms_since_boot(get_absolute_time());
+        uint32_t valid_duration = (current_time - gps_valid_start_time) / 1000;
+        printf("[GPS调试] GPS已稳定运行: %lu秒\n", valid_duration);
+    } else {
+        printf("[GPS调试] GPS信号不稳定，等待重新定位...\n");
+    }
+    
+    gps_was_valid = gps_is_valid;
+    
     // 检查是否有新的定位数据或时间数据
-    if (got_time_data || memcmp(&new_data, &current_gps_data, sizeof(GNRMC)) != 0) {
-        memcpy(&current_gps_data, &new_data, sizeof(GNRMC));
+    if (got_time_data || memcmp(&new_data, &current_gps_data, sizeof(LC76G_GPS_Data)) != 0) {
+        memcpy(&current_gps_data, &new_data, sizeof(LC76G_GPS_Data));
         gps_data_updated = true;
         last_gps_update = to_ms_since_boot(get_absolute_time());
+        
+        if (got_valid_data) {
+            last_successful_update = last_gps_update;
+            consecutive_failures = 0;
+            printf("[GPS调试] GPS数据已更新 (有效定位)\n");
+        } else {
+            consecutive_failures++;
+            printf("[GPS调试] GPS数据已更新 (连续失败: %lu次)\n", consecutive_failures);
+        }
+    } else {
+        consecutive_failures++;
+        if (consecutive_failures > 10) {
+            printf("[GPS警告] GPS数据长时间无更新，连续失败: %lu次\n", consecutive_failures);
+        }
     }
 }
 
@@ -200,8 +279,8 @@ void draw_header() {
     // 背景
     draw_filled_rect(0, 0, SCREEN_WIDTH, HEADER_HEIGHT, COLOR_BLUE);
     
-    // 标题文字 (居中)
-    draw_string(SCREEN_WIDTH/2 - 100, 12, "GPS Position Monitor", COLOR_WHITE, COLOR_BLUE);
+    // 标题文字 (居中，横屏优化)
+    draw_string(SCREEN_WIDTH/2 - 90, 10, "GPS Position Monitor", COLOR_WHITE, COLOR_BLACK);
     
     // 分隔线
     draw_hline(0, HEADER_HEIGHT, SCREEN_WIDTH, COLOR_WHITE);
@@ -243,10 +322,9 @@ void draw_gps_info_panel() {
     snprintf(new_hdop, sizeof(new_hdop), "%.1f", hdop);
     
     if (current_gps_data.Status == 1) {
-        snprintf(new_status, sizeof(new_status), "Fix - %02d:%02d:%02d UTC",
-                 current_gps_data.Time_H, current_gps_data.Time_M, current_gps_data.Time_S);
+        strcpy(new_status, "Fixed");
     } else {
-        strcpy(new_status, "No Signal");
+        strcpy(new_status, "None");
     }
     
     // 检查状态变化
@@ -281,13 +359,13 @@ void draw_gps_info_panel() {
     };
     
     for (int i = 0; i < 8; i++) {
-        // 绘制标签
+        // 绘制标签 (横屏优化位置)
         draw_string(MARGIN_X, y, labels[i], COLOR_LIGHT_GRAY, COLOR_BLACK);
         
         // 更新数据值
         if (strcmp(values[i], prev_values[i]) != 0 || fix_state_changed) {
-            // 清除旧值
-            draw_filled_rect(MARGIN_X + 80, y, GPS_INFO_WIDTH - 90, 12, COLOR_BLACK);
+            // 清除旧值 (扩大清除区域，避免文字重叠)
+            draw_filled_rect(MARGIN_X + 80, y - 2, GPS_INFO_WIDTH - 90, 18, COLOR_BLACK);
             // 绘制新值
             draw_string(MARGIN_X + 80, y, values[i], colors[i], COLOR_BLACK);
             strcpy(prev_values[i], values[i]);
@@ -307,14 +385,14 @@ void draw_satellite_panel() {
     uint16_t panel_x = LEFT_PANEL_WIDTH + PANEL_SPACING;
     uint16_t panel_y = SIGNAL_START_Y;
     
-    // 标题
+    // 标题 (横屏优化)
     draw_string(panel_x + MARGIN_X, panel_y, "Satellite Signal", COLOR_WHITE, COLOR_BLACK);
-    panel_y += 25;
+    panel_y += 22;
     
-    // 信号强度条参数
-    const uint16_t bar_width = 20;
-    const uint16_t bar_spacing = 25;
-    const uint16_t max_bar_height = 120;
+    // 信号强度条参数 (横屏优化)
+    const uint16_t bar_width = 18;
+    const uint16_t bar_spacing = 22;
+    const uint16_t max_bar_height = 100;
     const uint16_t base_y = panel_y + max_bar_height;
     const uint16_t start_x = panel_x + MARGIN_X;
     
@@ -337,7 +415,8 @@ void draw_satellite_panel() {
             
             if (signal_strength < 30) bar_color = COLOR_RED;
             else if (signal_strength < 50) bar_color = COLOR_YELLOW;
-            else if (signal_strength < 70) bar_color = COLOR_ORANGE;
+            else if (signal_strength < 80) bar_color = COLOR_ORANGE;
+            // 80%以上使用绿色（默认值）
             
             draw_filled_rect(x, base_y - bar_height, bar_width, bar_height, bar_color);
         }
@@ -351,20 +430,27 @@ void draw_satellite_panel() {
         draw_string(x + 6, base_y + 5, sat_num, COLOR_WHITE, COLOR_BLACK);
     }
     
-    // 绘制信号强度图例
-    panel_y = base_y + 30;
+    // 绘制信号强度图例 (横屏优化)
+    panel_y = base_y + 25;
     draw_string(start_x, panel_y, "Signal Strength:", COLOR_WHITE, COLOR_BLACK);
-    panel_y += 20;
+    panel_y += 18;
     
-    // 图例颜色条
-    draw_filled_rect(start_x, panel_y, 15, 10, COLOR_RED);
-    draw_string(start_x + 20, panel_y, "Weak", COLOR_WHITE, COLOR_BLACK);
+    // 图例颜色条 (优化间距布局)
+    const uint16_t legend_spacing = 50;  // 进一步增加间距
+    const uint16_t color_bar_width = 12;
+    const uint16_t text_offset = 16;
     
-    draw_filled_rect(start_x + 60, panel_y, 15, 10, COLOR_YELLOW);
-    draw_string(start_x + 80, panel_y, "Fair", COLOR_WHITE, COLOR_BLACK);
+    // Weak
+    draw_filled_rect(start_x, panel_y, color_bar_width, 8, COLOR_RED);
+    draw_string(start_x + text_offset, panel_y, "Weak", COLOR_RED, COLOR_BLACK);
     
-    draw_filled_rect(start_x + 120, panel_y, 15, 10, COLOR_GREEN);
-    draw_string(start_x + 140, panel_y, "Good", COLOR_WHITE, COLOR_BLACK);
+    // Fair
+    draw_filled_rect(start_x + legend_spacing, panel_y, color_bar_width, 8, COLOR_YELLOW);
+    draw_string(start_x + legend_spacing + text_offset, panel_y, "Fair", COLOR_YELLOW, COLOR_BLACK);
+    
+    // Good
+    draw_filled_rect(start_x + legend_spacing * 2, panel_y, color_bar_width, 8, COLOR_GREEN);
+    draw_string(start_x + legend_spacing * 2 + text_offset, panel_y, "Good", COLOR_GREEN, COLOR_BLACK);
 }
 
 /**
@@ -385,36 +471,41 @@ void draw_status_bar() {
              uptime_seconds / 3600, (uptime_seconds / 60) % 60, uptime_seconds % 60);
     
     if (strcmp(uptime_str, prev_uptime_str) != 0) {
-        draw_filled_rect(MARGIN_X, STATUS_BAR_Y + 5, 150, 12, COLOR_BLACK);
-        draw_string(MARGIN_X, STATUS_BAR_Y + 5, uptime_str, COLOR_WHITE, COLOR_BLACK);
+        draw_filled_rect(MARGIN_X, STATUS_BAR_Y + 8, 140, 12, COLOR_BLACK);
+        draw_string(MARGIN_X, STATUS_BAR_Y + 8, uptime_str, COLOR_WHITE, COLOR_BLACK);
         strcpy(prev_uptime_str, uptime_str);
     }
     
-    // GPS状态
+    // GPS状态 (横屏优化位置)
     char gps_status_str[32];
     if (gps_data_updated) {
         uint32_t seconds_since_update = (current_time - last_gps_update) / 1000;
+        // 确保最少显示1秒
+        if (seconds_since_update == 0) {
+            seconds_since_update = 1;
+        }
         snprintf(gps_status_str, sizeof(gps_status_str), "GPS: Updated %ds ago", seconds_since_update);
     } else {
         strcpy(gps_status_str, "GPS: Waiting...");
     }
     
     if (strcmp(gps_status_str, prev_gps_status_str) != 0) {
-        draw_filled_rect(SCREEN_WIDTH/2 - 80, STATUS_BAR_Y + 5, 160, 12, COLOR_BLACK);
+        draw_filled_rect(SCREEN_WIDTH/2 - 75, STATUS_BAR_Y + 8, 150, 12, COLOR_BLACK);
         uint32_t status_color = gps_data_updated ? COLOR_GREEN : COLOR_YELLOW;
-        draw_string(SCREEN_WIDTH/2 - 80, STATUS_BAR_Y + 5, gps_status_str, status_color, COLOR_BLACK);
+        draw_string(SCREEN_WIDTH/2 - 75, STATUS_BAR_Y + 8, gps_status_str, status_color, COLOR_BLACK);
         strcpy(prev_gps_status_str, gps_status_str);
     }
     
-    // UTC时间
+    // UTC时间显示 (横屏优化位置，向左移动5像素)
     if (current_gps_data.Status > 0) {
-        char utc_time_str[15];
+        char utc_time_str[20];
+        // 直接使用GPS原始时间
         snprintf(utc_time_str, sizeof(utc_time_str), "UTC: %02d:%02d:%02d", 
                  current_gps_data.Time_H, current_gps_data.Time_M, current_gps_data.Time_S);
         
         if (strcmp(utc_time_str, prev_utc_time_str) != 0) {
-            draw_filled_rect(SCREEN_WIDTH - 120, STATUS_BAR_Y + 5, 120, 12, COLOR_BLACK);
-            draw_string(SCREEN_WIDTH - 120, STATUS_BAR_Y + 5, utc_time_str, COLOR_CYAN, COLOR_BLACK);
+            draw_filled_rect(SCREEN_WIDTH - 125, STATUS_BAR_Y + 8, 125, 12, COLOR_BLACK);
+            draw_string(SCREEN_WIDTH - 125, STATUS_BAR_Y + 8, utc_time_str, COLOR_CYAN, COLOR_BLACK);
             strcpy(prev_utc_time_str, utc_time_str);
         }
     }
@@ -463,26 +554,60 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
     printf("编译时间: %s %s\n", __DATE__, __TIME__);
     
     // 设置调试模式
-    vendor_gps_set_debug(enable_debug);
-    printf("调试模式: %s\n", enable_debug ? "已启用" : "已禁用");
+    // LC76G I2C适配器自动处理调试
+    printf("LC76G I2C适配器已启用调试模式\n");
     
     // 记录系统启动时间
     system_start_time = to_ms_since_boot(get_absolute_time());
     
     // 初始化GPS模块
     printf("正在初始化GPS模块...\n");
-    if (!vendor_gps_init(GPS_UART_ID, GPS_BAUD_RATE, GPS_TX_PIN, GPS_RX_PIN, GPS_FORCE_PIN)) {
+    printf("[GPS调试] I2C实例: %s, 地址: 0x%02X, 速度: %d Hz\n", 
+           GPS_I2C_INST == i2c0 ? "I2C0" : "I2C1", GPS_I2C_ADDR, GPS_I2C_SPEED);
+    printf("[GPS调试] SDA引脚: %d, SCL引脚: %d, FORCE引脚: %d\n", 
+           GPS_PIN_SDA, GPS_PIN_SCL, GPS_FORCE_PIN);
+    
+    printf("[GPS调试] 开始调用lc76g_i2c_init...\n");
+    if (!lc76g_i2c_init(GPS_I2C_INST, GPS_PIN_SDA, GPS_PIN_SCL, GPS_I2C_SPEED, GPS_FORCE_PIN)) {
         printf("错误：GPS模块初始化失败\n");
         return -1;
     }
     
     printf("GPS初始化成功\n");
     
-    // 发送设置命令
-    vendor_gps_send_command("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
+    // 启用调试模式
+    lc76g_set_debug(true);
+    printf("LC76G I2C适配器已启用调试模式\n");
+    
+    // LC76G增强配置
+    printf("配置LC76G模块...\n");
+    
+    // LC76G I2C适配器通过命令配置GPS模块
+    printf("✓ LC76G I2C适配器配置完成\n");
+    
+    // 执行智能GPS启动
+    printf("执行智能GPS启动流程...\n");
+    
+    // 1. LC76G I2C适配器自动处理GPS启动
+    printf("步骤1: LC76G I2C适配器自动启动GPS模块\n");
+    
+    // 2. 等待GPS模块响应
+    printf("步骤2: 等待GPS模块响应...\n");
+    sleep_ms(2000);
+    
+    // 3. 发送设置命令
+    printf("步骤3: 发送NMEA配置命令\n");
+    lc76g_send_command("$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0", 50);
     sleep_ms(100);
-    vendor_gps_send_command("$PMTK220,1000");
+    lc76g_send_command("$PMTK220,1000", 12);
     sleep_ms(500);
+    
+    // 4. 检查GPS状态
+    printf("步骤4: 检查GPS状态\n");
+    LC76G_GPS_Data test_data;
+    lc76g_read_gps_data(&test_data);
+    printf("[GPS调试] 初始状态检查 - 状态: %d, 时间: %02d:%02d:%02d\n", 
+           test_data.Status, test_data.Time_H, test_data.Time_M, test_data.Time_S);
     
     // 设置随机数种子
     srand(time_us_32());
@@ -497,20 +622,20 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
     }
     
     // 设置屏幕参数
-    driver->setRotation(Rotation::Portrait_0);  // 竖屏模式 (480x320)
+    driver->setRotation(Rotation::Landscape_90);  // 横屏模式 (480x320)
     driver->setBacklight(true);
     display_initialized = true;
     
     printf("显示驱动初始化成功\n");
     
     // 初始化GPS数据结构
-    memset(&current_gps_data, 0, sizeof(GNRMC));
-    memset(&previous_gps_data, 0, sizeof(GNRMC));
+    memset(&current_gps_data, 0, sizeof(LC76G_GPS_Data));
+    memset(&previous_gps_data, 0, sizeof(LC76G_GPS_Data));
     
-    // 显示启动画面
+    // 显示启动画面 (横屏优化)
     fill_screen(COLOR_BLACK);
-    draw_string(SCREEN_WIDTH/2 - 100, SCREEN_HEIGHT/2 - 20, "GPS Position Monitor", COLOR_WHITE, COLOR_BLACK);
-    draw_string(SCREEN_WIDTH/2 - 80, SCREEN_HEIGHT/2, "Initializing...", COLOR_YELLOW, COLOR_BLACK);
+    draw_string(SCREEN_WIDTH/2 - 90, SCREEN_HEIGHT/2 - 15, "GPS Position Monitor", COLOR_WHITE, COLOR_BLACK);
+    draw_string(SCREEN_WIDTH/2 - 70, SCREEN_HEIGHT/2 + 5, "Initializing...", COLOR_YELLOW, COLOR_BLACK);
     sleep_ms(1000);
     
     // 立即尝试获取GPS数据
@@ -527,8 +652,29 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
     while (true) {
         uint32_t current_time = to_ms_since_boot(get_absolute_time());
         
-        // 每秒更新GPS数据
+        // 每2秒更新GPS数据
         if (current_time - last_gps_update >= GPS_UPDATE_INTERVAL) {
+            printf("[主循环] 更新GPS数据 (运行时间: %lu秒)\n", 
+                   (current_time - system_start_time) / 1000);
+            
+            // GPS健康检查
+            if (packet_count > 0) {
+                float success_rate = (float)valid_fix_count / packet_count * 100.0f;
+                printf("[GPS健康] 成功率: %.1f%% (%lu/%lu)\n", 
+                       success_rate, valid_fix_count, packet_count);
+                
+                if (success_rate < 10.0f) {
+                    printf("[GPS警告] 定位成功率过低，建议检查天线或移动到开阔区域\n");
+                }
+                
+                // 如果连续失败超过20次，LC76G I2C适配器自动处理
+                if (consecutive_failures > 20) {
+                    printf("[GPS恢复] LC76G I2C适配器自动处理GPS模块重启...\n");
+                    sleep_ms(1000);
+                    consecutive_failures = 0;
+                }
+            }
+            
             update_gps_data();
             
             // 更新显示

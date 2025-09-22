@@ -26,7 +26,7 @@ mingw32-make -j8
 
 if %ERRORLEVEL% NEQ 0 (
   echo  build failed!
-  pause
+  
   exit /b %ERRORLEVEL%
 )
 

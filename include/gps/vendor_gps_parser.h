@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "pico/stdlib.h"
+#include "hardware/i2c.h"
 
 // LC76G Enhanced GPS data structure supporting multiple NMEA formats
 typedef struct {
@@ -61,14 +62,15 @@ void vendor_gps_set_debug(bool enable);
 
 /**
  * @brief Initialize the vendor version of GPS module
- * @param uart_id UART ID (0 means UART0)
- * @param baud_rate Baud rate
- * @param tx_pin TX pin
- * @param rx_pin RX pin
+ * @param i2c_inst I2C instance
+ * @param i2c_addr I2C address
+ * @param sda_pin SDA pin
+ * @param scl_pin SCL pin
+ * @param i2c_speed I2C speed
  * @param force_pin FORCE pin (set to -1 if not used)
  * @return Whether initialization was successful
  */
-bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int force_pin);
+bool vendor_gps_init(i2c_inst_t *i2c_inst, uint8_t i2c_addr, uint sda_pin, uint scl_pin, uint i2c_speed, int force_pin);
 
 /**
  * @brief Send command to GPS module
@@ -142,6 +144,33 @@ bool vendor_gps_cold_start(void);
  * @return Whether command was successful
  */
 bool vendor_gps_hot_start(void);
+
+/**
+ * @brief Perform LC76G warm start
+ * @return Whether command was successful
+ */
+bool vendor_gps_warm_start(void);
+
+/**
+ * @brief Read RTC time from LC76G module
+ * @param rtc_time Pointer to store RTC time (seconds since epoch)
+ * @return Whether command was successful
+ */
+bool vendor_gps_read_rtc_time(uint32_t* rtc_time);
+
+/**
+ * @brief Set RTC time in LC76G module
+ * @param rtc_time RTC time (seconds since epoch)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_rtc_time(uint32_t rtc_time);
+
+/**
+ * @brief Smart GPS start based on power-off duration
+ * @param power_off_duration Duration in seconds since last GPS fix
+ * @return Whether start command was successful
+ */
+bool vendor_gps_smart_start(uint32_t power_off_duration);
 
 /**
  * @brief Save LC76G configuration to flash

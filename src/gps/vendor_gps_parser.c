@@ -8,7 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include "pico/stdlib.h"
-#include "hardware/uart.h"
+#include "hardware/i2c.h"
 #include "hardware/gpio.h"
 #include "gps/vendor_gps_parser.h"
 
@@ -24,11 +24,12 @@ static const double a = 6378245.0;
 static const double ee = 0.00669342162296594323;
 static const double x_pi = 3.14159265358979324 * 3000.0 / 180.0;
 
-// GPS UART configuration
-static uart_inst_t *gps_uart = NULL;
-static uint gps_uart_id = 0;
-static uint gps_tx_pin = 0;
-static uint gps_rx_pin = 0;
+// GPS I2C configuration
+static i2c_inst_t *gps_i2c = NULL;
+static uint8_t gps_i2c_addr = 0x42;
+static uint gps_sda_pin = 0;
+static uint gps_scl_pin = 0;
+static uint gps_i2c_speed = 100000;
 static int gps_force_pin = -1;
 
 // Data buffer
@@ -137,29 +138,23 @@ void vendor_gps_set_debug(bool enable) {
 /**
  * @brief Initialize the vendor version of GPS module
  */
-bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int force_pin) {
-    // Save UART configuration
-    gps_uart_id = uart_id;
-    gps_tx_pin = tx_pin;
-    gps_rx_pin = rx_pin;
+bool vendor_gps_init(i2c_inst_t *i2c_inst, uint8_t i2c_addr, uint sda_pin, uint scl_pin, uint i2c_speed, int force_pin) {
+    // Save I2C configuration
+    gps_i2c = i2c_inst;
+    gps_i2c_addr = i2c_addr;
+    gps_sda_pin = sda_pin;
+    gps_scl_pin = scl_pin;
+    gps_i2c_speed = i2c_speed;
     gps_force_pin = force_pin;
     
-    // Get UART instance based on ID
-    gps_uart = uart_id == 0 ? uart0 : uart1;
+    // Initialize I2C
+    i2c_init(gps_i2c, i2c_speed);
+    gpio_set_function(sda_pin, GPIO_FUNC_I2C);
+    gpio_set_function(scl_pin, GPIO_FUNC_I2C);
     
-    // Initialize UART
-    uart_init(gps_uart, baud_rate);
-    gpio_set_function(tx_pin, GPIO_FUNC_UART);
-    gpio_set_function(rx_pin, GPIO_FUNC_UART);
-    
-    // Configure UART flow control - no flow control
-    uart_set_hw_flow(gps_uart, false, false);
-    
-    // Configure UART data format - 8 data bits, no parity, 1 stop bit
-    uart_set_format(gps_uart, 8, 1, UART_PARITY_NONE);
-    
-    // Clear receive buffer
-    uart_set_fifo_enabled(gps_uart, true);
+    // Enable pull-ups
+    gpio_pull_up(sda_pin);
+    gpio_pull_up(scl_pin);
     
     // Initialize control pin (if available)
     if (force_pin >= 0) {
@@ -168,8 +163,8 @@ bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int
         gpio_put(force_pin, 0); // Default: low level
     }
     
-    printf("GPS module initialized: UART%d, Baud rate: %d, TX: %d, RX: %d\n", 
-            uart_id, baud_rate, tx_pin, rx_pin);
+    printf("GPS module initialized: I2C%d, Address: 0x%02X, SDA: %d, SCL: %d, Speed: %d Hz\n", 
+            i2c_inst == i2c0 ? 0 : 1, i2c_addr, sda_pin, scl_pin, i2c_speed);
     
     // Initialize GPS data
     memset(&GPS, 0, sizeof(GPS));
@@ -184,8 +179,8 @@ bool vendor_gps_init(uint uart_id, uint baud_rate, uint tx_pin, uint rx_pin, int
 void vendor_gps_send_command(const char *data) {
     char Check = data[1], Check_char[3]={0};
     uint8_t i = 0;
-    uart_putc(gps_uart, '\r');
-    uart_putc(gps_uart, '\n');
+    char command[256];
+    int cmd_len = 0;
     
     // Calculate checksum
     for(i=2; data[i] != '\0'; i++){
@@ -196,19 +191,30 @@ void vendor_gps_send_command(const char *data) {
     Check_char[1] = Temp[Check%16];
     Check_char[2] = '\0';
    
-    // Send command
-    for(i=0; data[i] != '\0'; i++){
-        uart_putc(gps_uart, data[i]);
+    // Build complete command with checksum
+    command[cmd_len++] = '\r';
+    command[cmd_len++] = '\n';
+    
+    // Add command data
+    for(i=0; data[i] != '\0' && cmd_len < 250; i++){
+        command[cmd_len++] = data[i];
     }
     
-    uart_putc(gps_uart, '*');
-    uart_putc(gps_uart, Check_char[0]);
-    uart_putc(gps_uart, Check_char[1]);
-    uart_putc(gps_uart, '\r');
-    uart_putc(gps_uart, '\n');
+    command[cmd_len++] = '*';
+    command[cmd_len++] = Check_char[0];
+    command[cmd_len++] = Check_char[1];
+    command[cmd_len++] = '\r';
+    command[cmd_len++] = '\n';
+    
+    // Send command via I2C
+    int result = i2c_write_blocking(gps_i2c, gps_i2c_addr, (uint8_t*)command, cmd_len, false);
     
     if (debug_output) {
-        printf("Sent GPS command: %s*%s\n", data, Check_char);
+        if (result == PICO_ERROR_GENERIC) {
+            printf("Failed to send GPS command: %s*%s\n", data, Check_char);
+        } else {
+            printf("Sent GPS command: %s*%s (sent %d bytes)\n", data, Check_char, result);
+        }
     }
 }
 
@@ -224,11 +230,11 @@ void vendor_gps_exit_backup_mode() {
 }
 
 /**
- * @brief Read a certain number of bytes from UART
+ * @brief Read a certain number of bytes from I2C
  * @param data Buffer to save data
  * @param Num Number of bytes to read
  */
-static void vendor_uart_receive_string(char *data, uint16_t Num) {
+static void vendor_i2c_receive_string(char *data, uint16_t Num) {
     uint16_t i = 0;
     
     // Ensure buffer is valid
@@ -242,19 +248,33 @@ static void vendor_uart_receive_string(char *data, uint16_t Num) {
     // Clear the beginning of the buffer to ensure clean data
     memset(data, 0, Num > 10 ? 10 : Num);
     
-    // Set timeout to avoid infinite waiting - increased to 300ms to improve the possibility of getting complete data
+    // Set timeout to avoid infinite waiting
     absolute_time_t timeout = make_timeout_time_ms(300);
-    absolute_time_t activity_timeout = make_timeout_time_ms(50); // Consider transmission ended if no data for 50ms
     absolute_time_t last_read_time = get_absolute_time();
     
+    // Try to read data from I2C GPS module
+    // Note: LC76G GPS module may not support I2C read directly
+    // This is a placeholder implementation - actual implementation depends on module capabilities
+    
     while (i < Num - 1) {
-        if (uart_is_readable(gps_uart)) {
-            data[i] = uart_getc(gps_uart);
+        // Attempt to read from I2C
+        uint8_t temp_byte = 0;
+        int result = i2c_read_blocking(gps_i2c, gps_i2c_addr, &temp_byte, 1, false);
+        
+        if (result == PICO_OK) {
+            data[i] = temp_byte;
             i++;
-            // Update last read time
             last_read_time = get_absolute_time();
+            
+            // Check if we have a complete NMEA sentence
+            if (i > 10 && (temp_byte == '\n' || temp_byte == '\r')) {
+                if (debug_output) {
+                    printf("GPS data read completed: Found NMEA sentence terminator\n");
+                }
+                break;
+            }
         } else {
-            // Check if no data has been received for a while, if so, transmission may have ended
+            // No data available, check timeout
             if (i > 10 && absolute_time_diff_us(last_read_time, get_absolute_time()) > 50000) {
                 if (debug_output) {
                     printf("GPS data read completed: No new data for 50ms\n");
@@ -271,11 +291,11 @@ static void vendor_uart_receive_string(char *data, uint16_t Num) {
             break;
         }
         
-        // Short sleep to avoid busy waiting - reduces CPU usage but maintains responsiveness
-        sleep_us(10);
+        // Short sleep to avoid busy waiting
+        sleep_us(1000);
     }
     
-    // Ensure data ends with NULL and check if there's a complete NMEA sentence
+    // Ensure data ends with NULL
     data[i] = '\0';
     
     // Check if the retrieved data is valid
@@ -339,13 +359,122 @@ GNRMC vendor_gps_get_gnrmc() {
     GPS.Altitude = prev_altitude;  // Keep previous altitude value
     
     // Use vendor's original code to receive NMEA data stream
-    vendor_uart_receive_string(buff_t, BUFFSIZE);
+    vendor_i2c_receive_string(buff_t, BUFFSIZE);
     
-    // If debugging, print received data (but only show first 100 characters to reduce log volume)
+    // Print original RAW data before any processing
     if (debug_output) {
+        printf("[GPS原始数据] 接收到的原始数据 (长度: %d):\n", (int)strlen(buff_t));
+        printf("--- ORIGINAL RAW DATA START ---\n");
+        printf("%s", buff_t);
+        printf("\n--- ORIGINAL RAW DATA END ---\n");
+    }
+    
+    // Clean up corrupted data - keep all NMEA standard characters
+    char cleaned_buffer[BUFFSIZE] = {0};
+    int clean_index = 0;
+    for (int i = 0; i < BUFFSIZE && buff_t[i] != '\0'; i++) {
+        char c = buff_t[i];
+        // Keep all NMEA standard characters: $, *, comma, digits, letters, CR, LF
+        // This includes all printable characters plus NMEA control characters
+        if (c >= 32 && c <= 126) {
+            cleaned_buffer[clean_index++] = c;
+        } else if (c == '\r' || c == '\n' || c == '\t') {
+            cleaned_buffer[clean_index++] = c;
+        }
+        // Skip only truly problematic characters (null, control chars except CR/LF)
+    }
+    cleaned_buffer[clean_index] = '\0';
+    
+    // Print cleaned data after character filtering
+    if (debug_output) {
+        printf("[GPS清理数据] 字符过滤后的数据 (长度: %d):\n", (int)strlen(cleaned_buffer));
+        printf("--- CLEANED DATA START ---\n");
+        printf("%s", cleaned_buffer);
+        printf("\n--- CLEANED DATA END ---\n");
+    }
+    
+    // NMEA standard compliant cleanup: preserve all valid NMEA data
+    // Only remove clearly corrupted data, keep ERROR strings as they might be valid GPS output
+    char* src = cleaned_buffer;
+    char* dst = buff_t;
+    
+    while (*src && (dst - buff_t) < BUFFSIZE - 1) {
+        // Keep all data that could be part of NMEA sentences
+        // ERROR strings are kept as they might be valid GPS module output
+        *dst++ = *src++;
+    }
+    *dst = '\0';
+    
+    // Print final processed data
+    if (debug_output) {
+        printf("[GPS最终数据] 垃圾清理后的最终数据 (长度: %d):\n", (int)strlen(buff_t));
+        printf("--- FINAL DATA START ---\n");
+        printf("%s", buff_t);
+        printf("\n--- FINAL DATA END ---\n");
+    }
+    
+    // If debugging, print received data
+    if (debug_output) {
+        // Print first 100 characters for quick overview
         char preview[101] = {0};
         strncpy(preview, buff_t, 100);
         printf("First 100 characters of GPS data: %s\n", preview);
+        
+        // Print complete RAW data for detailed analysis
+        printf("[GPS RAW数据] 完整数据流 (长度: %d):\n", (int)strlen(buff_t));
+        printf("--- RAW DATA START ---\n");
+        printf("%s", buff_t);
+        printf("\n--- RAW DATA END ---\n");
+        
+        // Additional debug: check for NMEA sentence patterns
+        if (strstr(buff_t, "$GNGGA") || strstr(buff_t, "$GPRMC") || strstr(buff_t, "$GNRMC")) {
+            printf("[GPS调试] 检测到NMEA句子模式\n");
+        } else {
+            printf("[GPS调试] 未检测到NMEA句子模式\n");
+        }
+        
+        // Count different sentence types with checksum validation
+        int gga_count = 0, rmc_count = 0, gsv_count = 0, gsa_count = 0;
+        int valid_checksum_count = 0, invalid_checksum_count = 0;
+        char* ptr = buff_t;
+        
+        // Count sentences and validate checksums
+        while ((ptr = strstr(ptr, "$")) != NULL) {
+            char* end_ptr = strchr(ptr, '\n');
+            if (!end_ptr) end_ptr = strchr(ptr, '\r');
+            if (!end_ptr) end_ptr = ptr + strlen(ptr);
+            
+            // Check if this looks like a complete NMEA sentence
+            char* checksum_pos = strchr(ptr, '*');
+            if (checksum_pos && checksum_pos < end_ptr) {
+                // Validate checksum
+                uint8_t calculated_checksum = 0;
+                for (char* p = ptr + 1; p < checksum_pos; p++) {
+                    calculated_checksum ^= *p;
+                }
+                
+                // Parse provided checksum
+                uint8_t provided_checksum = 0;
+                if (sscanf(checksum_pos + 1, "%2hhx", &provided_checksum) == 1) {
+                    if (calculated_checksum == provided_checksum) {
+                        valid_checksum_count++;
+                    } else {
+                        invalid_checksum_count++;
+                    }
+                }
+            }
+            
+            // Count sentence types
+            if (strncmp(ptr, "$GNGGA", 6) == 0 || strncmp(ptr, "$GPGGA", 6) == 0) gga_count++;
+            else if (strncmp(ptr, "$GNRMC", 6) == 0 || strncmp(ptr, "$GPRMC", 6) == 0) rmc_count++;
+            else if (strncmp(ptr, "$GPGSV", 6) == 0 || strncmp(ptr, "$GLGSV", 6) == 0) gsv_count++;
+            else if (strncmp(ptr, "$GNGSA", 6) == 0 || strncmp(ptr, "$GPGSA", 6) == 0) gsa_count++;
+            
+            ptr++;
+        }
+        
+        printf("[GPS统计] GGA: %d, RMC: %d, GSV: %d, GSA: %d\n", gga_count, rmc_count, gsv_count, gsa_count);
+        printf("[GPS校验] 有效校验和: %d, 无效校验和: %d\n", valid_checksum_count, invalid_checksum_count);
     }
     
     // Parse GSV messages for satellite information
@@ -373,11 +502,15 @@ GNRMC vendor_gps_get_gnrmc() {
         }
         gsv_line[i] = '\0';
         
-        if (debug_output) {
-            printf("Parsing GSV sentence: %s\n", gsv_line);
+        // Validate GSV sentence format - be more lenient for partial sentences
+        if (strlen(gsv_line) > 10) {
+            if (debug_output) {
+                printf("Parsing GSV sentence: %s\n", gsv_line);
+            }
+            parse_gsv_message(gsv_line);
+        } else if (debug_output) {
+            printf("Invalid GSV sentence format: %s\n", gsv_line);
         }
-        
-        parse_gsv_message(gsv_line);
     }
     
     // Find GNRMC or GPRMC sentence
@@ -419,6 +552,22 @@ GNRMC vendor_gps_get_gnrmc() {
         i++;
     }
     rmc_line[i] = '\0';
+    
+    // Validate sentence format
+    if (strlen(rmc_line) < 10 || strchr(rmc_line, '*') == NULL) {
+        if (debug_output) {
+            printf("Invalid %s sentence format: %s\n", using_gga ? "GGA" : "RMC", rmc_line);
+        }
+        
+        // If no valid sentence is found, keep previous time information to avoid flashing
+        GPS.Time_H = prev_time_h;
+        GPS.Time_M = prev_time_m;
+        GPS.Time_S = prev_time_s;
+        strncpy(GPS.Date, prev_date, sizeof(GPS.Date)-1);
+        GPS.Date[sizeof(GPS.Date)-1] = '\0';
+        
+        return GPS; // Invalid sentence format, return previous data
+    }
     
     if (debug_output) {
         if (using_gga) {
@@ -510,9 +659,17 @@ GNRMC vendor_gps_get_gnrmc() {
                     break;
                     
                 case 6: // Positioning quality indicator
-                    GPS.Status = (token[0] == '0') ? 0 : 1;
-                    if (debug_output) {
-                        printf("GGA positioning quality: %c -> Status=%d\n", token[0], GPS.Status);
+                    if (strlen(token) > 0 && token[0] >= '0' && token[0] <= '9') {
+                        GPS.Status = (token[0] == '0') ? 0 : 1;
+                        if (debug_output) {
+                            printf("GGA positioning quality: %c -> Status=%d\n", token[0], GPS.Status);
+                        }
+                    } else {
+                        // Invalid or empty quality indicator
+                        GPS.Status = 0;
+                        if (debug_output) {
+                            printf("GGA positioning quality: invalid/empty -> Status=0\n");
+                        }
                     }
                     break;
                     
@@ -725,25 +882,35 @@ PAIRResponse vendor_gps_send_pair_command(uint16_t command_id, const char* param
         printf("Sending PAIR command: %s", command);
     }
     
-    // Send command
-    uart_puts(gps_uart, command);
+    // Send command via I2C
+    int result = i2c_write_blocking(gps_i2c, gps_i2c_addr, (uint8_t*)command, strlen(command), false);
+    if (result == PICO_ERROR_GENERIC) {
+        if (debug_output) {
+            printf("Failed to send PAIR command\n");
+        }
+        return response;
+    }
     
     // Wait for response (with timeout)
     absolute_time_t timeout = make_timeout_time_ms(1000);
     uint16_t response_len = 0;
     
     while (!time_reached(timeout) && response_len < sizeof(response_buffer) - 1) {
-        if (uart_is_readable(gps_uart)) {
-            char c = uart_getc(gps_uart);
-            response_buffer[response_len++] = c;
+        uint8_t temp_byte = 0;
+        int result = i2c_read_blocking(gps_i2c, gps_i2c_addr, &temp_byte, 1, false);
+        
+        if (result == PICO_OK) {
+            response_buffer[response_len++] = temp_byte;
             
             // Check if we have a complete response
-            if (c == '\n' && response_len > 10) {
+            if (temp_byte == '\n' && response_len > 10) {
                 response_buffer[response_len] = '\0';
                 break;
             }
+        } else {
+            // No data available, wait a bit
+            sleep_us(1000);
         }
-        sleep_us(1000);
     }
     
     if (response_len > 0) {
@@ -752,16 +919,26 @@ PAIRResponse vendor_gps_send_pair_command(uint16_t command_id, const char* param
         // Parse PAIR response: $PAIR001,<CommandID>,<Result>*<Checksum>
         char* pair_start = strstr(response_buffer, "$PAIR001");
         if (pair_start) {
+            // Find the end of the response (before checksum)
+            char* checksum_start = strchr(pair_start, '*');
+            if (checksum_start) {
+                *checksum_start = '\0'; // Null terminate before checksum
+            }
+            
             char* token = strtok(pair_start, ",");
             int field = 0;
             
             while (token != NULL && field < 3) {
                 switch (field) {
                     case 1: // Command ID
-                        response.CommandID = atoi(token);
+                        if (strlen(token) > 0) {
+                            response.CommandID = atoi(token);
+                        }
                         break;
                     case 2: // Result
-                        response.Result = atoi(token);
+                        if (strlen(token) > 0) {
+                            response.Result = atoi(token);
+                        }
                         break;
                 }
                 token = strtok(NULL, ",");
@@ -858,6 +1035,72 @@ bool vendor_gps_cold_start(void) {
 bool vendor_gps_hot_start(void) {
     PAIRResponse response = vendor_gps_send_pair_command(004, NULL);
     return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Perform LC76G warm start
+ * @return Whether command was successful
+ */
+bool vendor_gps_warm_start(void) {
+    PAIRResponse response = vendor_gps_send_pair_command(005, NULL);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Read RTC time from LC76G module
+ * @param rtc_time Pointer to store RTC time (seconds since epoch)
+ * @return Whether command was successful
+ */
+bool vendor_gps_read_rtc_time(uint32_t* rtc_time) {
+    if (!rtc_time) return false;
+    
+    // 注意：LC76G可能不支持PAIR008命令
+    // 这里先返回失败，使用备用方案
+    printf("[GPS启动] 警告：LC76G可能不支持RTC时间读取命令\n");
+    return false;
+    
+    // 如果LC76G支持RTC读取，需要根据实际响应格式解析
+    // PAIRResponse response = vendor_gps_send_pair_command(8, NULL);
+    // if (response.Valid && response.Result == 0) {
+    //     // 需要解析响应中的时间数据，不是response.Result
+    //     *rtc_time = parse_rtc_time_from_response(response);
+    //     return true;
+    // }
+    // return false;
+}
+
+/**
+ * @brief Set RTC time in LC76G module
+ * @param rtc_time RTC time (seconds since epoch)
+ * @return Whether command was successful
+ */
+bool vendor_gps_set_rtc_time(uint32_t rtc_time) {
+    char params[16];
+    snprintf(params, sizeof(params), "%u", rtc_time);
+    
+    PAIRResponse response = vendor_gps_send_pair_command(9, params);
+    return response.Valid && response.Result == 0;
+}
+
+/**
+ * @brief Smart GPS start based on power-off duration
+ * @param power_off_duration Duration in seconds since last GPS fix
+ * @return Whether start command was successful
+ */
+bool vendor_gps_smart_start(uint32_t power_off_duration) {
+    printf("[GPS启动] 断电时长: %u秒 (%.1f小时)\n", 
+           power_off_duration, power_off_duration / 3600.0f);
+    
+    if (power_off_duration < 7200) {      // 2小时内 - 热启动
+        printf("[GPS启动] 执行热启动 (TTFF: 1-10秒)\n");
+        return vendor_gps_hot_start();
+    } else if (power_off_duration < 86400) { // 24小时内 - 温启动
+        printf("[GPS启动] 执行温启动 (TTFF: 20-40秒)\n");
+        return vendor_gps_warm_start();
+    } else {                              // 超过24小时 - 冷启动
+        printf("[GPS启动] 执行冷启动 (TTFF: 30秒以上)\n");
+        return vendor_gps_cold_start();
+    }
 }
 
 /**
