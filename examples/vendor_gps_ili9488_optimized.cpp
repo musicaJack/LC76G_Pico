@@ -737,8 +737,14 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
 static bool initialize_sd_logger() {
     printf("[SD Logger] 正在初始化GPS SD卡日志记录器...\n");
     
-    // 配置SD卡 (使用默认配置)
-    MicroSD::SPIConfig sd_config = MicroSD::Config::DEFAULT;
+    // 配置SD卡 (使用简化配置)
+    SimpleSD::SPIConfig sd_config;
+    sd_config.spi_instance = 0;      // SPI0
+    sd_config.cs_pin = 17;           // CS引脚
+    sd_config.mosi_pin = 19;         // MOSI引脚
+    sd_config.miso_pin = 16;         // MISO引脚
+    sd_config.sck_pin = 18;           // SCK引脚
+    sd_config.baudrate = 1000000;    // 1MHz波特率
     
     // 配置日志记录器
     GPS::GPSLogger::LogConfig log_config;
@@ -800,6 +806,15 @@ static void check_log_flush() {
     if (current_time - last_log_flush_time >= 10000) {
         if (gps_logger->flush_buffer()) {
             printf("[SD Logger] 缓冲区已刷新\n");
+            
+            // 每30秒生成一次高德API格式文件
+            static uint64_t last_gaode_write = 0;
+            if (current_time - last_gaode_write >= 30000) {
+                if (gps_logger->write_gaode_api_format()) {
+                    printf("[SD Logger] 高德API格式文件已更新\n");
+                }
+                last_gaode_write = current_time;
+            }
         } else {
             printf("[SD Logger] 缓冲区刷新失败\n");
         }

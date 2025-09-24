@@ -99,24 +99,19 @@ set_target_properties(ili9488_display_module PROPERTIES
 )
 
 # =============================================================================
-# MicroSD 模块库
+# MicroSD 模块库 (简化实现)
 # =============================================================================
-
-# 添加MicroSD库的包含目录
-include_directories(${CMAKE_CURRENT_LIST_DIR}/demo/MicroSD-Pico/include)
 
 # 添加pico_fatfs子目录
 add_subdirectory(lib/pico_fatfs)
 
-# MicroSD库 (使用demo目录中的实现)
+# 简化的MicroSD库 (直接使用pico_fatfs)
 add_library(microsd_module
-    demo/MicroSD-Pico/src/rw_sd.cpp
-    demo/MicroSD-Pico/src/storage_device.cpp
+    src/gps/simple_sd_writer.cpp
 )
 
 # 为MicroSD模块添加私有包含目录
 target_include_directories(microsd_module PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}/demo/MicroSD-Pico/include
     ${CMAKE_CURRENT_LIST_DIR}/lib/pico_fatfs
     ${CMAKE_CURRENT_LIST_DIR}/lib/pico_fatfs/fatfs
 )
@@ -213,36 +208,7 @@ set_target_properties(vendor_gps_ili9488_optimized PROPERTIES
 # 创建额外文件(.uf2, .hex等)
 pico_add_extra_outputs(vendor_gps_ili9488_optimized)
 
-# GPS SD卡日志记录演示程序
-add_executable(gps_sd_logger_demo
-    examples/gps_sd_logger_demo.cpp
-)
-
-# 链接GPS SD卡日志记录演示程序所需库
-target_link_libraries(gps_sd_logger_demo
-    pico_stdlib
-    hardware_i2c
-    hardware_gpio
-    hardware_spi
-    pico_time
-    pico_sync
-    microsd_module
-    lc76g_i2c_adaptor
-    gps_logger_module
-)
-
-# 为GPS SD卡日志记录演示程序启用USB输出，禁用UART输出
-pico_enable_stdio_usb(gps_sd_logger_demo 1)
-pico_enable_stdio_uart(gps_sd_logger_demo 0)
-
-# 设置C++编译属性
-set_target_properties(gps_sd_logger_demo PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-)
-
-# 创建额外文件(.uf2, .hex等)
-pico_add_extra_outputs(gps_sd_logger_demo)
+# GPS SD卡日志记录功能已集成到vendor_gps_ili9488_optimized中
 
 
 

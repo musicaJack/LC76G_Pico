@@ -23,7 +23,7 @@
 #include <ctime>
 #include <array>
 #include "gps/lc76g_i2c_adaptor.h"
-#include "rw_sd.hpp"
+#include "gps/simple_sd_writer.hpp"
 
 namespace GPS {
 
@@ -58,6 +58,8 @@ public:
         double latitude;         // 纬度 (WGS84)
         double longitude_gcj02;  // 经度 (GCJ02 - 高德坐标系)
         double latitude_gcj02;   // 纬度 (GCJ02 - 高德坐标系)
+        double altitude;         // 海拔高度 (米)
+        double course;           // 航向 (度)
         std::string timestamp;   // ISO 8601时间戳
         uint8_t satellites;      // 卫星数量
         double hdop;            // 水平精度因子
@@ -65,19 +67,25 @@ public:
     };
 
 private:
-    std::unique_ptr<MicroSD::RWSD> sd_card_;
+    std::unique_ptr<SimpleSD::SimpleSDWriter> sd_card_;
     LogConfig config_;
     std::string current_log_file_;
     size_t current_file_size_;
     uint32_t daily_file_counter_;
     std::string current_date_;
     bool is_initialized_;
+    bool log_file_created_;        // 日志文件是否已创建
     
     // 内存优化的批量写入缓冲区
     std::array<char, 2048> write_buffer_;           // 2KB写入缓冲区
     size_t buffer_used_;                            // 缓冲区已使用大小
     size_t pending_records_;                        // 待写入记录数
     uint64_t last_write_time_;                      // 上次写入时间
+    
+    // 高德API格式坐标数组 (使用固定大小数组避免动态内存分配)
+    static constexpr size_t MAX_COORDINATES = 1000;  // 最大坐标数量
+    std::pair<double, double> gaode_coordinates_[MAX_COORDINATES];  // 存储[经度,纬度]对
+    size_t gaode_coordinate_count_;  // 当前坐标数量
     
     // 坐标转换相关
     static constexpr double PI = 3.14159265358979324;
@@ -90,7 +98,7 @@ public:
      * @param sd_config SD卡配置
      * @param log_config 日志配置
      */
-    GPSLogger(const MicroSD::SPIConfig& sd_config = MicroSD::Config::DEFAULT,
+    GPSLogger(const SimpleSD::SPIConfig& sd_config,
               const LogConfig& log_config = LogConfig{
                   .log_directory = "/gps_logs",
                   .max_file_size = 512 * 1024,
@@ -183,6 +191,18 @@ public:
      * @return 统计信息字符串
      */
     std::string get_log_statistics() const;
+    
+    /**
+     * @brief 生成高德API格式的坐标数组
+     * @return 高德API格式的坐标数组字符串
+     */
+    std::string generate_gaode_api_format() const;
+    
+    /**
+     * @brief 将高德API格式写入到单独的文件
+     * @return 写入是否成功
+     */
+    bool write_gaode_api_format();
 
     /**
      * @brief 强制同步数据到SD卡
@@ -288,6 +308,20 @@ private:
      * @return 时间戳
      */
     uint64_t get_current_timestamp_ms();
+    
+    /**
+     * @brief 从GPS数据中提取日期时间
+     * @param gps_data GPS数据
+     * @return 日期时间字符串 (YYYY-MM-DD_HH:MM:SS格式)
+     */
+    std::string extract_datetime_from_gps(const LC76G_GPS_Data& gps_data);
+    
+    /**
+     * @brief 基于GPS日期创建日志文件
+     * @param gps_data GPS数据
+     * @return 创建是否成功
+     */
+    bool create_log_file_from_gps_date(const LC76G_GPS_Data& gps_data);
 };
 
 /**
@@ -297,7 +331,7 @@ private:
  * @return GPS日志记录器实例
  */
 std::unique_ptr<GPSLogger> create_gps_logger(
-    const MicroSD::SPIConfig& sd_config = MicroSD::Config::DEFAULT,
+    const SimpleSD::SPIConfig& sd_config,
     const GPSLogger::LogConfig& log_config = GPSLogger::LogConfig{}
 );
 
