@@ -18,6 +18,10 @@
 #include "hardware/gpio.h"
 #include "pico/time.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // =============================================================================
 // LC76G I2C寄存器定义 (基于厂商demo)
 // =============================================================================
@@ -207,5 +211,9 @@ Coordinates lc76g_get_baidu_coordinates(void);
  * @return Google地图坐标
  */
 Coordinates lc76g_get_google_coordinates(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* LC76G_I2C_ADAPTOR_H */

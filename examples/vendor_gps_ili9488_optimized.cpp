@@ -33,9 +33,22 @@ extern "C" {
 #include "gps/lc76g_i2c_adaptor.h"
 }
 
+// GPS SD卡日志记录器
+#include "gps/gps_logger.hpp"
+
 // 使用C++命名空间
 using namespace ili9488;
 using namespace pico_ili9488_gfx;
+
+// =============================================================================
+// 函数声明
+// =============================================================================
+
+// GPS SD卡日志记录器函数声明
+static bool initialize_sd_logger();
+static void process_gps_logging(const LC76G_GPS_Data& gps_data);
+static void check_log_flush();
+static std::string get_sd_logger_stats();
 
 // =============================================================================
 // 显示配置常量 (480x320横屏布局)
@@ -113,6 +126,13 @@ static uint32_t last_gps_update = 0;
 static uint32_t packet_count = 0;
 static uint32_t valid_fix_count = 0;
 static bool enable_debug = true;
+
+// GPS SD卡日志记录器
+static GPS::GPSLogger* gps_logger = nullptr;
+static bool sd_logger_initialized = false;
+static uint32_t total_logged_records = 0;
+static uint32_t failed_log_records = 0;
+static uint64_t last_log_flush_time = 0;
 
 // 系统状态
 static bool display_initialized = false;
@@ -579,6 +599,14 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
     lc76g_set_debug(true);
     printf("LC76G I2C适配器已启用调试模式\n");
     
+    // 初始化GPS SD卡日志记录器 (可选功能)
+    printf("正在初始化GPS SD卡日志记录器...\n");
+    if (initialize_sd_logger()) {
+        printf("GPS SD卡日志记录器初始化成功\n");
+    } else {
+        printf("GPS SD卡日志记录器初始化失败，系统将继续运行\n");
+    }
+    
     // LC76G增强配置
     printf("配置LC76G模块...\n");
     
@@ -622,7 +650,7 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
     }
     
     // 设置屏幕参数
-    driver->setRotation(Rotation::Landscape_90);  // 横屏模式 (480x320)
+    driver->setRotation(Rotation::Landscape_270);  // 横屏模式 (480x320) - 旋转180度
     driver->setBacklight(true);
     display_initialized = true;
     
@@ -677,6 +705,9 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
             
             update_gps_data();
             
+            // 处理GPS数据记录到SD卡 (后台运行)
+            process_gps_logging(current_gps_data);
+            
             // 更新显示
             if (display_initialized) {
                 update_display();
@@ -685,11 +716,112 @@ extern "C" int vendor_gps_ili9488_optimized_demo() {
             last_gps_update = current_time;
         }
         
+        // 检查并刷新SD卡日志缓冲区 (后台运行)
+        check_log_flush();
+        
         // 短暂延时
         sleep_ms(10);
     }
     
     return 0;
+}
+
+// =============================================================================
+// GPS SD卡日志记录器函数
+// =============================================================================
+
+/**
+ * @brief 初始化GPS SD卡日志记录器
+ * @return true 初始化成功，false 初始化失败
+ */
+static bool initialize_sd_logger() {
+    printf("[SD Logger] 正在初始化GPS SD卡日志记录器...\n");
+    
+    // 配置SD卡 (使用默认配置)
+    MicroSD::SPIConfig sd_config = MicroSD::Config::DEFAULT;
+    
+    // 配置日志记录器
+    GPS::GPSLogger::LogConfig log_config;
+    log_config.log_directory = "/gps_logs";
+    log_config.max_file_size = 256 * 1024;        // 256KB文件大小
+    log_config.max_files_per_day = 50;            // 每天最多50个文件
+    log_config.buffer_size = 1024;                // 1KB缓冲区
+    log_config.batch_write_count = 5;             // 5条记录批量写入
+    log_config.write_interval_ms = 5000;          // 5秒写入间隔
+    log_config.enable_immediate_write = false;    // 使用批量写入
+    log_config.enable_coordinate_transform = true; // 启用坐标转换
+    
+    // 创建GPS日志记录器
+    gps_logger = new GPS::GPSLogger(sd_config, log_config);
+    
+    if (!gps_logger->initialize()) {
+        printf("[SD Logger] 初始化失败，SD卡可能不可用\n");
+        delete gps_logger;
+        gps_logger = nullptr;
+        return false;
+    }
+    
+    sd_logger_initialized = true;
+    printf("[SD Logger] 初始化成功，日志文件: %s\n", gps_logger->get_current_log_file().c_str());
+    return true;
+}
+
+/**
+ * @brief 处理GPS数据记录到SD卡
+ * @param gps_data GPS数据
+ */
+static void process_gps_logging(const LC76G_GPS_Data& gps_data) {
+    if (!sd_logger_initialized || !gps_logger) {
+        return;
+    }
+    
+    // 只有GPS信号有效时才记录
+    if (gps_data.Status) {
+        if (gps_logger->log_gps_data(gps_data)) {
+            total_logged_records++;
+        } else {
+            failed_log_records++;
+            printf("[SD Logger] GPS数据记录失败\n");
+        }
+    }
+}
+
+/**
+ * @brief 检查并刷新SD卡日志缓冲区
+ */
+static void check_log_flush() {
+    if (!sd_logger_initialized || !gps_logger) {
+        return;
+    }
+    
+    uint64_t current_time = to_ms_since_boot(get_absolute_time());
+    
+    // 每10秒刷新一次缓冲区
+    if (current_time - last_log_flush_time >= 10000) {
+        if (gps_logger->flush_buffer()) {
+            printf("[SD Logger] 缓冲区已刷新\n");
+        } else {
+            printf("[SD Logger] 缓冲区刷新失败\n");
+        }
+        last_log_flush_time = current_time;
+    }
+}
+
+/**
+ * @brief 获取SD卡日志统计信息
+ * @return 统计信息字符串
+ */
+static std::string get_sd_logger_stats() {
+    if (!sd_logger_initialized || !gps_logger) {
+        return "SD卡日志: 未初始化";
+    }
+    
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), 
+             "SD卡日志: 记录 %u 条, 失败 %u 条, 文件: %s",
+             total_logged_records, failed_log_records,
+             gps_logger->get_current_log_file().c_str());
+    return std::string(buffer);
 }
 
 /**

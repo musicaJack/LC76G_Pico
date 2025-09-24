@@ -1,0 +1,78 @@
+{
+  "gps_logger_config": {
+    "version": "2.0.0",
+    "description": "GPS坐标SD卡日志记录器配置",
+    
+    "sd_card": {
+      "spi_port": "spi1",
+      "pin_miso": 11,
+      "pin_mosi": 12,
+      "pin_sck": 10,
+      "pin_cs": 13,
+      "clk_slow": 400000,
+      "clk_fast": 40000000
+    },
+    
+    "logging": {
+      "log_directory": "/gps_logs",
+      "file_extension": ".log",
+      "max_file_size_kb": 256,
+      "max_files_per_day": 50,
+      "auto_create_directory": true
+    },
+    
+    "memory_optimization": {
+      "buffer_size_bytes": 1024,
+      "batch_write_count": 5,
+      "write_interval_ms": 5000,
+      "enable_immediate_write": false,
+      "buffer_flush_threshold": 0.8
+    },
+    
+    "coordinate_transform": {
+      "enable_transform": true,
+      "source_coordinate_system": "WGS84",
+      "target_coordinate_system": "GCJ02",
+      "description": "WGS84转GCJ02坐标系，适配高德地图API"
+    },
+    
+    "gps_settings": {
+      "update_interval_ms": 1000,
+      "read_timeout_ms": 5000,
+      "enable_debug": true,
+      "min_satellites": 4,
+      "min_hdop": 5.0
+    },
+    
+    "monitoring": {
+      "log_flush_interval_ms": 10000,
+      "stats_interval_ms": 30000,
+      "memory_check_interval_ms": 5000,
+      "enable_detailed_logs": true
+    },
+    
+    "data_format": {
+      "timestamp_format": "ISO8601",
+      "coordinate_precision": 6,
+      "include_raw_coordinates": true,
+      "include_satellite_info": true,
+      "include_hdop": true,
+      "description": "格式: 经度,纬度,时间戳,卫星数,HDOP,经度(GCJ02),纬度(GCJ02)"
+    },
+    
+    "performance": {
+      "max_memory_usage_kb": 8,
+      "target_write_frequency_hz": 0.2,
+      "buffer_overflow_protection": true,
+      "auto_cleanup_old_logs": true,
+      "cleanup_retention_days": 30
+    },
+    
+    "error_handling": {
+      "max_retry_attempts": 3,
+      "retry_delay_ms": 1000,
+      "enable_error_recovery": true,
+      "log_errors_to_file": true
+    }
+  }
+}
